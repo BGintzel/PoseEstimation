@@ -76,13 +76,17 @@ while True:
         list = getList(results, img)
         start, end = getBoundingbox(list)
         if len(list) > 1:
-            detect_fall(start,end)
+            if detect_fall(start,end):
+                text = "Gefallen"
+            else:
+                text = "Steht noch"
             save_boxes(start, end)
             if boxes[-1][2]:
                 color = (0,0,255)
             else:
                 color = (0,255,0)
             img = cv2.rectangle(img, start, end, color, thickness=3)
+            img = cv2.putText(img, text, (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, color)
 
         mpDraw.draw_landmarks(img, results.pose_landmarks, mpPose.POSE_CONNECTIONS)
 
