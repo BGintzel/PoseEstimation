@@ -7,6 +7,7 @@ pose = mpPose.Pose()
 
 cap = cv2.VideoCapture(0)
 
+boxes = []
 
 def getBoundingbox(list):
     x=[]
@@ -35,18 +36,54 @@ def getList(results, img):
 
     return lm_list
 
+
+def fallen(start, end):
+    height = end[1]-start[1]
+    width = end[0]-start[0]
+    fallen = False
+    if height<width:
+        fallen = True
+
+    return fallen
+
+
+def save_boxes(start, end):
+    f = fallen(start, end)
+    boxes.append([start, end, f])
+
+
+def detect_fall(start, end):
+    counter = 0
+    fall = False
+
+    for box in boxes[-9:]:
+        if box[2]:
+            counter += 1
+
+    if counter>8:
+        fall = True
+
+    return fall
+
+
 while True:
     success, img = cap.read()
     imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     results = pose.process(imgRGB)
-    #print(results.pose_landmarks.landmark)
+
     if results.pose_landmarks:
         list = getList(results, img)
-        print(list)
         start, end = getBoundingbox(list)
-        if len(list) > 15:
-            img = cv2.rectangle(img, start, end, color=(0, 0, 0),thickness=3)
+        if len(list) > 1:
+            detect_fall(start,end)
+            save_boxes(start, end)
+            if boxes[-1][2]:
+                color = (0,0,255)
+            else:
+                color = (0,255,0)
+            img = cv2.rectangle(img, start, end, color, thickness=3)
+
         mpDraw.draw_landmarks(img, results.pose_landmarks, mpPose.POSE_CONNECTIONS)
 
     cv2.imshow("Image", img)
