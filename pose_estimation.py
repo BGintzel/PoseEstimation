@@ -2,10 +2,7 @@ import cv2
 import mediapipe as mp
 from collections import deque
 
-
-def set_globals():
-    global boxes
-    boxes = deque(10*[[0, 0, 0]], 10)
+boxes = deque(10 * [[0, 0, 0]], 10)
 
 
 def get_boundingbox(list):
@@ -47,15 +44,16 @@ def fallen(start, end):
 
 
 def save_boxes(start, end):
+    global boxes
     f = fallen(start, end)
     boxes.append([start, end, f])
 
 
-def detect_fall(start, end):
+def detect_box_fall(start, end):
     counter = 0
     fall = False
 
-    for box in boxes[-9:]:
+    for box in boxes:
         if box[2]:
             counter += 1
 
@@ -65,12 +63,22 @@ def detect_fall(start, end):
     return fall
 
 
-def start_detection(results, img):
-    lm_list = get_list(results, img)
+def detect_lines_fall(results):
+    #code von Artem
+    return True
 
-    start, end = get_boundingbox(lm_list)
+
+def detect_lm_fall(results):
+    fall = False
+
+
+    return fall
+
+
+
+def setup_img(start, end, lm_list, box_fall, lines_fall, lm_fall):
     if len(lm_list) > 1:
-        if detect_fall(start, end):
+        if box_fall:
             text = "Gefallen"
         else:
             text = "Steht noch"
@@ -82,11 +90,23 @@ def start_detection(results, img):
         img = cv2.rectangle(img, start, end, color, thickness=3)
         img = cv2.putText(img, text, (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, color)
 
-        return img
+    return img
+
+
+def start_detection(results, img):
+    global boxes
+    lm_list = get_list(results, img)
+
+    start, end = get_boundingbox(lm_list)
+    box_fall = detect_box_fall(start, end)
+    lines_fall = detect_lines_fall(results)
+    lm_fall = detect_lm_fall(results)
+    img = setup_img(start, end, lm_list, box_fall, lines_fall, lm_fall)
+
+    return img
 
 
 if __name__ == "__main__":
-    set_globals()
 
     mpDraw = mp.solutions.drawing_utils
     mpPose = mp.solutions.pose
