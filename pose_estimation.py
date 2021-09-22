@@ -1,5 +1,11 @@
 import cv2
 import mediapipe as mp
+from collections import deque
+
+
+def set_globals():
+    global boxes
+    boxes = deque(10*[[0, 0, 0]], 10)
 
 
 def get_boundingbox(list):
@@ -80,13 +86,14 @@ def start_detection(results, img):
 
 
 if __name__ == "__main__":
+    set_globals()
+
     mpDraw = mp.solutions.drawing_utils
     mpPose = mp.solutions.pose
     pose = mpPose.Pose()
 
     cap = cv2.VideoCapture(0)
 
-    boxes = []
     while True:
         success, img = cap.read()
         imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
