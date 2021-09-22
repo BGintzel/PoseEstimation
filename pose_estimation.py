@@ -5,10 +5,10 @@ from collections import deque
 boxes = deque(10 * [[0, 0, 0]], 10)
 
 
-def get_boundingbox(list):
+def get_bounding_box(list_loc):
     x = []
     y = []
-    for lm in list:
+    for lm in list_loc:
         x.append(lm[1])
         y.append(lm[2])
 
@@ -21,11 +21,11 @@ def get_boundingbox(list):
     return start, end
 
 
-def get_list(results, img):
+def get_list(results_loc, img_loc):
     lm_list = []
 
-    for id, lm in enumerate(results.pose_landmarks.landmark):
-        h, w, c = img.shape
+    for id, lm in enumerate(results_loc.pose_landmarks.landmark):
+        h, w, c = img_loc.shape
         x, y = int(lm.x * w), int(lm.y * h)
         if lm.visibility > 0.5:
             lm_list.append([id, x, y, lm.visibility])
@@ -63,20 +63,25 @@ def detect_box_fall(start, end):
     return fall
 
 
-def detect_lines_fall(results):
-    #code von Artem
+def detect_lines_fall(results_loc):
+    # code von Artem
     return True
 
 
-def detect_lm_fall(results):
+def detect_lm_fall(lm_list, img_loc):
     fall = False
+    h, w, c = img_loc.shape
+    under_half = 0
+    for lm in lm_list:
+        if lm[2] > h/2:
+            under_half += 1
 
-
+    if under_half/len(lm_list) > 0.8:
+        fall = True
     return fall
 
 
-
-def setup_img(start, end, lm_list, box_fall, lines_fall, lm_fall):
+def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall):
     if len(lm_list) > 1:
         if box_fall:
             text = "Gefallen"
@@ -87,23 +92,23 @@ def setup_img(start, end, lm_list, box_fall, lines_fall, lm_fall):
             color = (0, 0, 255)
         else:
             color = (0, 255, 0)
-        img = cv2.rectangle(img, start, end, color, thickness=3)
-        img = cv2.putText(img, text, (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, color)
+        img_loc = cv2.rectangle(img_loc, start, end, color, thickness=3)
+        img_loc = cv2.putText(img_loc, text, (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, color)
 
-    return img
+    return img_loc
 
 
-def start_detection(results, img):
+def start_detection(results_loc, img_loc):
     global boxes
-    lm_list = get_list(results, img)
+    lm_list = get_list(results_loc, img_loc)
 
-    start, end = get_boundingbox(lm_list)
+    start, end = get_bounding_box(lm_list)
     box_fall = detect_box_fall(start, end)
-    lines_fall = detect_lines_fall(results)
-    lm_fall = detect_lm_fall(results)
-    img = setup_img(start, end, lm_list, box_fall, lines_fall, lm_fall)
+    lines_fall = detect_lines_fall(results_loc)
+    lm_fall = detect_lm_fall(lm_list, img)
+    img_loc = setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall)
 
-    return img
+    return img_loc
 
 
 if __name__ == "__main__":
