@@ -3,6 +3,7 @@
   <component name="ChangeListManager">
     <list default="true" id="2790a2c6-cb4d-45af-b2d2-0bc152c7484c" name="Default Changelist" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pose_estimation.py" beforeDir="false" afterPath="$PROJECT_DIR$/pose_estimation.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -120,24 +121,32 @@
       <option name="project" value="LOCAL" />
       <updated>1632145505769</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="4">
+      <created>1632224247110</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1632224247111</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="1" />
     <MESSAGE value="2" />
     <MESSAGE value="3" />
-    <option name="LAST_COMMIT_MESSAGE" value="3" />
+    <MESSAGE value="4" />
+    <option name="LAST_COMMIT_MESSAGE" value="4" />
   </component>
   <component name="WindowStateProjectService">
     <state x="414" y="175" width="1092" height="706" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1632139033606">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="414" y="175" width="1092" height="706" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632139033606" />
-    <state x="614" y="114" key="CommitChangelistDialog2" timestamp="1632145504989">
+    <state x="614" y="114" key="CommitChangelistDialog2" timestamp="1632224246162">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="614" y="114" key="CommitChangelistDialog2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632145504989" />
+    <state x="614" y="114" key="CommitChangelistDialog2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632224246162" />
     <state x="740" y="283" key="FileChooserDialogImpl" timestamp="1632002798080">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
@@ -170,13 +179,17 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="693" y="199" key="SettingsEditor/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632139094051" />
-    <state x="552" y="253" key="Vcs.Push.Dialog.v2" timestamp="1632145511840">
+    <state x="552" y="253" key="Vcs.Push.Dialog.v2" timestamp="1632224252796">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="552" y="253" key="Vcs.Push.Dialog.v2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632145511840" />
-    <state x="656" y="344" key="com.intellij.ide.util.TipDialog" timestamp="1632224171851">
+    <state x="552" y="253" key="Vcs.Push.Dialog.v2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632224252796" />
+    <state x="656" y="344" key="com.intellij.ide.util.TipDialog" timestamp="1632308837748">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="656" y="344" key="com.intellij.ide.util.TipDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632224171851" />
+    <state x="656" y="344" key="com.intellij.ide.util.TipDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632308837748" />
+    <state x="701" y="163" key="refactoring.ChangeSignatureDialog" timestamp="1632309380384">
+      <screen x="0" y="0" width="1920" height="1040" />
+    </state>
+    <state x="701" y="163" key="refactoring.ChangeSignatureDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632309380384" />
   </component>
 </project>
