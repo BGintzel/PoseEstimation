@@ -314,9 +314,10 @@ def detect_lm_fall(lm_list, img_loc):
 # confidence #####################################################################################
 
 
-def check_lights(img_loc, threshold=20, minimum=0):
+def check_lights(img_loc, threshold=50, minimum=30):
     img_gray = cv2.cvtColor(img_loc, cv2.COLOR_BGR2GRAY)
     average = img_gray.mean(axis=0).mean(axis=0)
+    print(average)
     conf = (average - minimum) / (threshold-minimum)
     if conf > 1:
         conf = 1
