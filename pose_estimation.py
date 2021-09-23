@@ -162,16 +162,19 @@ def get_list(results_loc, img_loc):
 def get_bounding_box(list_loc):
     x = []
     y = []
+    start = (0, 0)
+    end = (0, 0)
     for lm in list_loc:
         x.append(lm[1])
         y.append(lm[2])
 
-    top = min(y)
-    bot = max(y)
-    left = min(x)
-    right = max(x)
-    start = (left, top)
-    end = (right, bot)
+    if len(y)>0 and len(x)>0:
+        top = min(y)
+        bot = max(y)
+        left = min(x)
+        right = max(x)
+        start = (left, top)
+        end = (right, bot)
     return start, end
 
 
