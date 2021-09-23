@@ -311,18 +311,20 @@ def detect_lm_fall(lm_list, img_loc):
 # confidence #####################################################################################
 
 
-def check_lights(img_loc, threshold=80, minimum=20):
+def check_lights(img_loc, threshold=20, minimum=0):
     img_gray = cv2.cvtColor(img_loc, cv2.COLOR_BGR2GRAY)
     average = img_gray.mean(axis=0).mean(axis=0)
-    conf = average - 20 / threshold
+    conf = (average - minimum) / (threshold-minimum)
     if conf > 1:
         conf = 1
+    if conf < 0:
+        conf = 0
     return conf
 
 
 def calculate_confidence(img_loc, lm_list):
-    threshold = 80
-    conf = check_lights(img_loc, threshold)
+
+    conf = check_lights(img_loc)
 
     if len(lm_list) == 0:
         return conf
@@ -357,7 +359,7 @@ if __name__ == "__main__":
 
         img, fall, confidence = start_detection(results, img)
 
-        #print(str(fall), ", ", str(confidence))
+        print("Gefallen: " + str(fall), ", Konfidenz: ", str(confidence))
         cv2.imshow("Image", img)
         cv2.waitKey(1)
 
