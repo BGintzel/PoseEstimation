@@ -289,13 +289,15 @@ def detect_lines_fall(results_loc, frame):
 # fall detection landmarks ###################################################################
 
 def detect_lm_fall(lm_list, img_loc):
-    min = 10
+    min = 10*(len(lm_list)/33)
     h, w, c = img_loc.shape
     under_half = 0
     for lm in lm_list:
         if lm[2] > h * 0.3:
             under_half += 1
 
+    print(under_half)
+    print(len(lm_list))
     fall_value = (under_half - min) / len(lm_list)
 
     if fall_value < 0:
@@ -356,6 +358,7 @@ if __name__ == "__main__":
 
         img, fall, confidence = start_detection(results, img)
 
+        #print(str(fall), ", ", str(confidence))
         cv2.imshow("Image", img)
         cv2.waitKey(1)
 
