@@ -3,7 +3,6 @@
   <component name="ChangeListManager">
     <list default="true" id="2790a2c6-cb4d-45af-b2d2-0bc152c7484c" name="Default Changelist" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pose_estimation.py" beforeDir="false" afterPath="$PROJECT_DIR$/pose_estimation.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -156,7 +155,21 @@
       <option name="project" value="LOCAL" />
       <updated>1632312401167</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="Geruest detection">
+      <created>1632409384057</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1632409384057</updated>
+    </task>
+    <task id="LOCAL-00011" summary="Combined">
+      <created>1632409422486</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1632409422486</updated>
+    </task>
+    <option name="localTasksCounter" value="12" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
@@ -167,17 +180,18 @@
     <MESSAGE value="aufgeräumt" />
     <MESSAGE value="deque eingefügt" />
     <MESSAGE value="Geruest detection" />
-    <option name="LAST_COMMIT_MESSAGE" value="Geruest detection" />
+    <MESSAGE value="Combined" />
+    <option name="LAST_COMMIT_MESSAGE" value="Combined" />
   </component>
   <component name="WindowStateProjectService">
     <state x="414" y="175" width="1092" height="706" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1632139033606">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="414" y="175" width="1092" height="706" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632139033606" />
-    <state x="614" y="114" key="CommitChangelistDialog2" timestamp="1632409409848">
+    <state x="614" y="114" key="CommitChangelistDialog2" timestamp="1632409440152">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="614" y="114" key="CommitChangelistDialog2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632409409848" />
+    <state x="614" y="114" key="CommitChangelistDialog2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632409440152" />
     <state x="740" y="283" key="FileChooserDialogImpl" timestamp="1632002798080">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
@@ -210,10 +224,10 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="693" y="199" key="SettingsEditor/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632139094051" />
-    <state x="552" y="253" key="Vcs.Push.Dialog.v2" timestamp="1632409386725">
+    <state x="552" y="253" key="Vcs.Push.Dialog.v2" timestamp="1632409515284">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
-    <state x="552" y="253" key="Vcs.Push.Dialog.v2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632409386725" />
+    <state x="552" y="253" key="Vcs.Push.Dialog.v2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632409515284" />
     <state x="656" y="344" key="com.intellij.ide.util.TipDialog" timestamp="1632402203343">
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
