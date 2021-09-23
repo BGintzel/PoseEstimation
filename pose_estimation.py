@@ -179,7 +179,7 @@ def fallen(start, end):
     height = end[1] - start[1]
     width = end[0] - start[0]
     fallen = False
-    if height < width:
+    if height/width < 1.3:
         fallen = True
 
     return fallen
@@ -333,7 +333,7 @@ def calculate_confidence(img_loc, lm_list):
 ##################################################################################################
 
 
-###################################### main loop #################################################
+# main loop ######################################################################################
 
 
 if __name__ == "__main__":
