@@ -151,7 +151,7 @@ def get_list(results_loc, img_loc):
     for id, lm in enumerate(results_loc.pose_landmarks.landmark):
         h, w, c = img_loc.shape
         x, y = int(lm.x * w), int(lm.y * h)
-        if lm.visibility > 0.5:
+        if lm.visibility > 0.5 and 0.0 <= lm.x <= 1.0 and 0.0 <= lm.y <= 1.0:
             lm_list.append([id, x, y, lm.visibility])
 
     return lm_list
@@ -290,6 +290,7 @@ def detect_lines_fall(results_loc, frame):
 
 def detect_lm_fall(lm_list, img_loc):
     min = 10*(len(lm_list)/33)
+    max_value = (len(lm_list)-min)/len(lm_list)
     h, w, c = img_loc.shape
     under_half = 0
     for lm in lm_list:
@@ -297,8 +298,9 @@ def detect_lm_fall(lm_list, img_loc):
             under_half += 1
 
     print(under_half)
+    print(min)
     print(len(lm_list))
-    fall_value = (under_half - min) / len(lm_list)
+    fall_value = ((under_half - min) / len(lm_list))/max_value
 
     if fall_value < 0:
         fall_value = 0
