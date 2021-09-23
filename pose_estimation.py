@@ -293,7 +293,7 @@ def detect_lm_fall(lm_list, img_loc):
     h, w, c = img_loc.shape
     under_half = 0
     for lm in lm_list:
-        if lm[2] > h / 2:
+        if lm[2] > h * 0.3:
             under_half += 1
 
     fall_value = (under_half - min) / len(lm_list)
