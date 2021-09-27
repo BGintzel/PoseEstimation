@@ -1,6 +1,10 @@
+import struct
+
 import cv2
 import mediapipe as mp
 import numpy as np
+import time
+import socket
 from collections import deque
 
 # global  ####################################################################################
@@ -168,7 +172,7 @@ def get_bounding_box(list_loc):
         x.append(lm[1])
         y.append(lm[2])
 
-    if len(y)>0 and len(x)>0:
+    if len(y) > 0 and len(x) > 0:
         top = min(y)
         bot = max(y)
         left = min(x)
@@ -182,7 +186,7 @@ def fallen(start, end):
     height = end[1] - start[1]
     width = end[0] - start[0]
     fallen = False
-    if height/width < 1.3:
+    if height / width < 1.3:
         fallen = True
 
     return fallen
@@ -292,15 +296,15 @@ def detect_lines_fall(results_loc, frame):
 # fall detection landmarks ###################################################################
 
 def detect_lm_fall(lm_list, img_loc):
-    min = 10*(len(lm_list)/33)
-    max_value = (len(lm_list)-min)/len(lm_list)
+    min = 10 * (len(lm_list) / 33)
+    max_value = (len(lm_list) - min) / len(lm_list)
     h, w, c = img_loc.shape
     under_half = 0
     for lm in lm_list:
         if lm[2] > h * 0.5:
             under_half += 1
 
-    fall_value = ((under_half - min) / len(lm_list))/max_value
+    fall_value = ((under_half - min) / len(lm_list)) / max_value
 
     if fall_value < 0:
         fall_value = 0
@@ -318,7 +322,7 @@ def check_lights(img_loc, threshold=50, minimum=30):
     img_gray = cv2.cvtColor(img_loc, cv2.COLOR_BGR2GRAY)
     average = img_gray.mean(axis=0).mean(axis=0)
     print(average)
-    conf = (average - minimum) / (threshold-minimum)
+    conf = (average - minimum) / (threshold - minimum)
     if conf > 1:
         conf = 1
     if conf < 0:
@@ -327,7 +331,6 @@ def check_lights(img_loc, threshold=50, minimum=30):
 
 
 def calculate_confidence(img_loc, lm_list):
-
     conf = check_lights(img_loc)
 
     if len(lm_list) == 0:
@@ -342,6 +345,12 @@ def calculate_confidence(img_loc, lm_list):
 # main loop ######################################################################################
 
 
+def send_per_udp(fall_loc, confidence_loc, udp_ip, udp_port_send):
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    coord_struct = struct.pack('!fff', fall_loc, confidence_loc)
+    udp_socket.sendto(coord_struct, (udp_ip, udp_port_send))
+
+
 if __name__ == "__main__":
 
     mpDraw = mp.solutions.drawing_utils
@@ -349,6 +358,9 @@ if __name__ == "__main__":
     pose = mpPose.Pose()
 
     cap = cv2.VideoCapture(0)
+
+    c = 0
+    current = time.time()
 
     while True:
         success, img = cap.read()
@@ -364,6 +376,10 @@ if __name__ == "__main__":
         img, fall, confidence = start_detection(results, img)
 
         print("Gefallen: " + str(fall), ", Konfidenz: ", str(confidence))
+
+        if time.time() > current:
+            send_per_udp(fall, confidence)
+
         cv2.imshow("Image", img)
         cv2.waitKey(1)
 
