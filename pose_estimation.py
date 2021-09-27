@@ -321,7 +321,7 @@ def detect_lm_fall(lm_list, img_loc):
 def check_lights(img_loc, threshold=50, minimum=30):
     img_gray = cv2.cvtColor(img_loc, cv2.COLOR_BGR2GRAY)
     average = img_gray.mean(axis=0).mean(axis=0)
-    print(average)
+    #print(average)
     conf = (average - minimum) / (threshold - minimum)
     if conf > 1:
         conf = 1
@@ -347,8 +347,14 @@ def calculate_confidence(img_loc, lm_list):
 
 def send_per_udp(fall_loc, confidence_loc, udp_ip, udp_port_send):
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    coord_struct = struct.pack('!fff', fall_loc, confidence_loc)
-    udp_socket.sendto(coord_struct, (udp_ip, udp_port_send))
+    print("start send")
+
+    data = (str(fall_loc) + ", " + str(confidence_loc)).encode("UTF-8")
+    udp_socket.sendto(data, (udp_ip, udp_port_send))
+    print("sent")
+
+
+
 
 
 if __name__ == "__main__":
@@ -375,10 +381,13 @@ if __name__ == "__main__":
 
         img, fall, confidence = start_detection(results, img)
 
-        print("Gefallen: " + str(fall), ", Konfidenz: ", str(confidence))
+        #print("Gefallen: " + str(fall), ", Konfidenz: ", str(confidence))
 
-        if time.time() > current:
-            send_per_udp(fall, confidence)
+        if time.time() - current >= 1:
+            #send_per_udp(round(fall, 2), round(confidence, 2), "10.71.188.82", 6789)
+            print(current-time.time())
+            current = time.time()
+
 
         cv2.imshow("Image", img)
         cv2.waitKey(1)
