@@ -1,6 +1,7 @@
 import mediapipe as mp
 import cv2 as cv
 import numpy as np
+import time
 
 ######### init mediapipe solution ##################
 mp_pose = mp.solutions.pose
@@ -46,21 +47,122 @@ def find_right_leg(keypoints):
     return keypoints[24] - keypoints[28]
 
 def find_orientation(line):
-    orientation = -line[1] / np.abs(line[0])
+    #scalar from [-1,1] -1 if upright, 0 if horizontal, 1 if upside down
+    orientation = np.arctan2(line[1] , np.abs(line[0])) / (np.pi/2)
     return orientation
 
-def fall_detection_lines(upper_body_is_not_upright, left_leg_is_not_upright, right_leg_is_not_upright):
-    fall_votes = 0
+def fall_detection_lines(keypoints):
+    #returns scalar from [0,1], 0 if upright, 1 if horizontal or upside down
+    #based on orientation of both legs and upper body
+    upper_body = find_upper_body(keypoints)
+    left_leg = find_left_leg(keypoints)
+    right_leg = find_right_leg(keypoints)
+    
+    upper_body_orientation = find_orientation(upper_body)
+    left_leg_orientation = find_orientation(left_leg)
+    right_leg_orientation = find_orientation(right_leg)
+    
+    upper_body_is_not_upright = upper_body_orientation > -0.5
     if upper_body_is_not_upright:
-        fall_votes += 1
-    if left_leg_is_not_upright:
-        fall_votes += 1
-    if right_leg_is_not_upright:
-        fall_votes += 1
-    if fall_votes >= 2:
-        return True
+        color = (0, 0, 255)
     else:
-        return False
+        color = (0, 255, 0)
+    plot_upper_body(frame, keypoints, upper_body, color)
+
+    left_leg_is_not_upright = left_leg_orientation > -0.5
+    if left_leg_is_not_upright:
+        color = (0, 0, 255)
+    else:
+        color = (0, 255, 0)
+    plot_left_leg(frame, keypoints, left_leg, color)
+    
+    right_leg_is_not_upright = right_leg_orientation > -0.5
+    if right_leg_is_not_upright:
+        color = (0, 0, 255)
+    else:
+        color = (0, 255, 0)
+    plot_right_leg(frame, keypoints, right_leg, color)
+    
+    
+    fall_value = (1/3)*(upper_body_orientation + left_leg_orientation + right_leg_orientation)
+    fall_value = fall_value+1
+    fall_value = np.clip(fall_value,0,1)
+    
+    return fall_value
+
+def fall_detection_lower_half(keypoints, frame):
+    #count landmarks in lower half of frame. head has higher weight than hands
+    #feet should not be counted
+    h,w,c = frame.shape
+    fall_value = 0
+    for i,kp in enumerate(keypoints[:25]):
+        if kp[1] > h/2:
+            if i in [15,16,17,18,19,20,21,22]:
+                fall_value += 0.25/19
+            else:
+                fall_value += 1/19
+
+    return fall_value
+
+########### confidence functions ######################
+
+def brightness(frame):
+    intensities = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+    mean_intensity = np.mean(intensities.flatten())
+    return mean_intensity/255
+
+def confidence_brightness(frame):
+    #scalar from [0,1] 0 if dark 1 if bright
+    #scaling determined through testing
+    b = brightness(frame)
+    confidence = (b-0.03)/ 0.15
+    confidence = np.clip(confidence,0,1)
+    return confidence
+
+############################################################
+
+###### Kalman Filter ########################################
+#filters outliers, tracked value has inertia/delay, only when lots of frames vote for fall
+class KalmanFilter:
+    def __init__(self, fall_value, confidence):
+        velocity = 0
+        self.x = np.array([fall_value, velocity])
+        self.I = np.array([
+                           [confidence,0],
+                           [0, 1/1000]
+                           ])
+        self.prev_time_stamp = time.time()
+    
+    def iterate(self, new_fall_value, new_confidence):
+        #prediction
+        next_time_stamp = time.time()
+        delta_t = next_time_stamp - self.prev_time_stamp
+        F = np.array([
+                      [1, delta_t],
+                      [0, 1]
+                      ])
+        #low sigma->high inertia
+        Sigma = 0.9
+        D = Sigma**2 * np.array([
+                                   [1/4*delta_t**4, 1/2*delta_t**3],
+                                   [1/2*delta_t**3, delta_t**2]
+                                   ])
+        self.prev_time_stamp = next_time_stamp
+        self.x = F@self.x
+        self.I = np.linalg.inv(F @ np.linalg.inv(self.I) @ F.T + D)
+          
+          
+        #filtering
+        new_x = np.array([new_fall_value, 0])
+        new_I = np.array([
+                            [new_confidence, 0],
+                            [0, 1/1000]
+                            ])
+        filtered_I = self.I + new_I
+        filtered_x = np.linalg.inv(filtered_I)@(self.I@self.x + new_I@new_x)
+          
+        self.x = filtered_x
+        self.I = filtered_I
 
 
 ################################################################################################
@@ -75,10 +177,9 @@ def plot_landmarks(frame, results):
                               )
 
 
-def plot_text(frame, text, color):
+def plot_text(frame, text, color=(0,255,0), position = (30, 50)):
     font = cv.FONT_HERSHEY_SIMPLEX
-    position = (50, 50)
-    fontScale = 1
+    fontScale = 0.7
     thickness = 2
     cv.putText(frame, text, position, font, fontScale, color, thickness, cv.LINE_AA)
 
@@ -121,6 +222,7 @@ def plot_right_leg(frame, keypoints, vector, color):
 
 ###################################### main loop ##################################################
 
+KF = KalmanFilter(0,1/1000)
 cap = cv.VideoCapture(0)
 while True:
     success, frame = cap.read()
@@ -131,45 +233,26 @@ while True:
     if results.pose_landmarks is not None:
         plot_landmarks(frame, results)
         keypoints = results_to_keypoints(frame, results)
-        upper_body = find_upper_body(keypoints)
-        left_leg = find_left_leg(keypoints)
-        right_leg = find_right_leg(keypoints)
         
-        upper_body_orientation = find_orientation(upper_body)
-        left_leg_orientation = find_orientation(left_leg)
-        right_leg_orientation = find_orientation(right_leg)
-        
-        upper_body_is_not_upright = upper_body_orientation < 1
-        if upper_body_is_not_upright:
-            color = (0, 0, 255)
-        else:
-            color = (0, 255, 0)
-        plot_upper_body(frame, keypoints, upper_body, color)
-
-        left_leg_is_not_upright = left_leg_orientation < 1
-        if left_leg_is_not_upright:
-            color = (0, 0, 255)
-        else:
-            color = (0, 255, 0)
-        plot_left_leg(frame, keypoints, left_leg, color)
-        
-        right_leg_is_not_upright = right_leg_orientation < 1
-        if right_leg_is_not_upright:
-            color = (0, 0, 255)
-        else:
-            color = (0, 255, 0)
-        plot_right_leg(frame, keypoints, right_leg, color)
-        
-        
-        fall_detected = fall_detection_lines(upper_body_is_not_upright, left_leg_is_not_upright, right_leg_is_not_upright)
-        if fall_detected:
+        fall_value = fall_detection_lines(keypoints)
+        if fall_value > 0.5:
             color = (0, 0, 255)
             text = 'Fall'
         else:
             color = (0, 255, 0)
             text = 'Kein Fall'
-        plot_text(frame, text, color)
-
+        plot_text(frame, str(round(fall_value,2)), color)
+        
+        KF.iterate(fall_value, 1)
+        fall_state = KF.x[0]
+        fall_state = np.clip(fall_state, 0, 1)
+        if fall_state > 0.5:
+            color = (0, 0, 255)
+            text = 'Fall'
+        else:
+            color = (0, 255, 0)
+            text = 'Kein Fall'
+        plot_text(frame, str(round(fall_state,2)), color, (30,100))
 
     cv.imshow('live', frame)
 
