@@ -12,6 +12,9 @@ import numpy as np
 # global  ####################################################################################
 
 boxes = deque(10 * [[0, 0, 0]], 10)
+vid_detection_for_fusion = deque(10 * [[0.0, 0.0, 0.0]], 10)
+vid_detection = deque(10 * [[0.0, 0.0, 0.0]], 10)
+
 
 
 ##############################################################################################
@@ -347,7 +350,7 @@ def calculate_confidence(img_loc, lm_list):
 # main loop ######################################################################################
 
 
-def receive_per_udp(udp_ip, udp_port):
+def receive_per_udp(udp_ip, udp_port, radar_detection):
     sock = socket.socket(socket.AF_INET,  # Internet
                          socket.SOCK_DGRAM)  # UDP
     sock.bind((udp_ip, udp_port))
@@ -355,10 +358,26 @@ def receive_per_udp(udp_ip, udp_port):
         data, addr = sock.recvfrom(1024)  # buffer size is 1024 bytes
         message_json = data.decode()  # this is just a string
         message_dict = json.loads(message_json)
-        print("received message: %s" % data)
+        radar_detection[0] = float(message_dict["time_stamp"])
+        radar_detection[1] = float(message_dict["fall_value"])
+        radar_detection[2] = float(message_dict["confidence"])
+        #print(radar_detection[0])
 
 
-def loop():
+def append_new_fall_value():
+    fall = 0
+    confidence_loc = 0
+    length_of_detection = 0
+    for detection in vid_detection:
+        if detection[0] != 0.0:
+            fall += detection[1]
+            confidence_loc += detection[2]
+            length_of_detection += 1
+    now = time.time()
+    vid_detection_for_fusion.append([now, fall / length_of_detection, confidence_loc / length_of_detection])
+
+
+def loop(radar_detection):
     mpDraw = mp.solutions.drawing_utils
     mpPose = mp.solutions.pose
     pose = mpPose.Pose()
@@ -379,8 +398,13 @@ def loop():
             mpDraw.draw_landmarks(img, results.pose_landmarks, mpPose.POSE_CONNECTIONS)
 
         img, fall, confidence = start_detection(results, img)
+        now = time.time()
+        vid_detection.append([now, fall, confidence])
 
-        # print("Gefallen: " + str(fall), ", Konfidenz: ", str(confidence))
+        if time.time() - current >= 1:
+            append_new_fall_value()
+            fusion(radar_detection)
+            current = time.time()
 
         cv2.imshow("Image", img)
         cv2.waitKey(1)
@@ -390,13 +414,40 @@ def loop():
     cv2.waitKey(1)
 
 
-if __name__ == "__main__":
+##################################################################################################
 
+
+# fusion ######################################################################################
+
+def fusion(radar_detection):
+    vid = vid_detection_for_fusion[-1]
+    sum_of_confidences = 0
+    fall_fusion = 0
+    #print("vid: ", vid[0])
+    #print("rad: ", radar_detection[0])
+    #print(abs(vid[0] - radar_detection[0]))
+    # wenn die letzen einträge weniger als eine Sekunde auseinander liegen
+    if abs(vid[0] - radar_detection[0]) < 1:
+        sum_of_confidences = vid[2] + radar_detection[2]
+        if sum_of_confidences != 0:
+            g_vid = vid[2] / sum_of_confidences
+            g_radar = radar_detection[2] / sum_of_confidences
+            fall_fusion = g_vid * vid[1] + g_radar * radar_detection[1]
+    confidence_fusion = sum_of_confidences / 2
+    print(round(fall_fusion,2), round(confidence_fusion,2))
+
+
+
+if __name__ == "__main__":
     UDP_IP = "localhost"
     UDP_PORT = 6789
 
-    video = multiprocessing.Process(target=loop, args=[])
-    udp = multiprocessing.Process(target=receive_per_udp, args=[UDP_IP, UDP_PORT])
+    radar_detection = multiprocessing.Array('d', 3, lock=multiprocessing.Lock())
+
+    video = multiprocessing.Process(target=loop, args=[radar_detection])
+    udp = multiprocessing.Process(target=receive_per_udp, args=[UDP_IP, UDP_PORT, radar_detection])
+
     video.start()
     udp.start()
 
+    #loop(radar_detection)
