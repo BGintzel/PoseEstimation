@@ -1,11 +1,13 @@
-import struct
+import socket
+import json
+import time
+import multiprocessing
+
+from collections import deque
 
 import cv2
 import mediapipe as mp
 import numpy as np
-import time
-import socket
-from collections import deque
 
 # global  ####################################################################################
 
@@ -118,7 +120,7 @@ def calculate_fall_value(box_fall, lines_fall, lm_fall, box_weighting=1 / 3, lin
 def start_detection(results_loc, img_loc):
     global boxes
     fall_value = 0
-    if results.pose_landmarks:
+    if results_loc.pose_landmarks:
         lm_list = get_list(results_loc, img_loc)
 
         # bounding box: Value [0,1] ###
@@ -129,7 +131,7 @@ def start_detection(results_loc, img_loc):
         lines_fall = detect_lines_fall(results_loc, img_loc)
 
         # landmarks: Value [0,1]  ###
-        lm_fall = detect_lm_fall(lm_list, img)
+        lm_fall = detect_lm_fall(lm_list, img_loc)
 
         fall_value = calculate_fall_value(box_fall, lines_fall, lm_fall)
 
@@ -143,7 +145,7 @@ def start_detection(results_loc, img_loc):
     return img_loc, fall_value, conf
 
 
-def inference(frame):
+def inference(frame, pose):
     # run mediapipe net on frame and output results
     results = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     return results
@@ -321,7 +323,7 @@ def detect_lm_fall(lm_list, img_loc):
 def check_lights(img_loc, threshold=50, minimum=30):
     img_gray = cv2.cvtColor(img_loc, cv2.COLOR_BGR2GRAY)
     average = img_gray.mean(axis=0).mean(axis=0)
-    #print(average)
+    # print(average)
     conf = (average - minimum) / (threshold - minimum)
     if conf > 1:
         conf = 1
@@ -345,24 +347,21 @@ def calculate_confidence(img_loc, lm_list):
 # main loop ######################################################################################
 
 
-def send_per_udp(fall_loc, confidence_loc, udp_ip, udp_port_send):
-    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    print("start send")
+def receive_per_udp(udp_ip, udp_port):
+    sock = socket.socket(socket.AF_INET,  # Internet
+                         socket.SOCK_DGRAM)  # UDP
+    sock.bind((udp_ip, udp_port))
+    while True:
+        data, addr = sock.recvfrom(1024)  # buffer size is 1024 bytes
+        message_json = data.decode()  # this is just a string
+        message_dict = json.loads(message_json)
+        print("received message: %s" % data)
 
-    data = (str(fall_loc) + ", " + str(confidence_loc)).encode("UTF-8")
-    udp_socket.sendto(data, (udp_ip, udp_port_send))
-    print("sent")
 
-
-
-
-
-if __name__ == "__main__":
-
+def loop():
     mpDraw = mp.solutions.drawing_utils
     mpPose = mp.solutions.pose
     pose = mpPose.Pose()
-
     cap = cv2.VideoCapture(0)
 
     c = 0
@@ -374,20 +373,14 @@ if __name__ == "__main__":
             print('webcam not found')
             continue
 
-        results = inference(img)
+        results = inference(img, pose)
 
         if results.pose_landmarks:
             mpDraw.draw_landmarks(img, results.pose_landmarks, mpPose.POSE_CONNECTIONS)
 
         img, fall, confidence = start_detection(results, img)
 
-        #print("Gefallen: " + str(fall), ", Konfidenz: ", str(confidence))
-
-        if time.time() - current >= 1:
-            #send_per_udp(round(fall, 2), round(confidence, 2), "10.71.188.82", 6789)
-            print(current-time.time())
-            current = time.time()
-
+        # print("Gefallen: " + str(fall), ", Konfidenz: ", str(confidence))
 
         cv2.imshow("Image", img)
         cv2.waitKey(1)
@@ -395,3 +388,15 @@ if __name__ == "__main__":
     cap.release()
     cv2.destroyAllWindows()
     cv2.waitKey(1)
+
+
+if __name__ == "__main__":
+
+    UDP_IP = "localhost"
+    UDP_PORT = 6789
+
+    video = multiprocessing.Process(target=loop, args=[])
+    udp = multiprocessing.Process(target=receive_per_udp, args=[UDP_IP, UDP_PORT])
+    video.start()
+    udp.start()
+
