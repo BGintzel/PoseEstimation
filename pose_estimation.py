@@ -431,6 +431,7 @@ def loop():
     mpPose = mp.solutions.pose
     pose = mpPose.Pose()
     cap = cv2.VideoCapture(0)
+    current = time.time()
 
     while True:
         radar_detection = receive_per_udp(sock)
@@ -452,8 +453,10 @@ def loop():
         vid_detection.append([now, fall, confidence])
 
         
-        append_new_fall_value()
-        fusion(newest_radar_detection)
+        if time.time() - current >= 1:
+            append_new_fall_value()
+            fusion(newest_radar_detection)
+            current = time.time()
 
 
         cv2.imshow("Image", img)
