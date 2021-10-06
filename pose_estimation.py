@@ -238,7 +238,7 @@ def fallen(start, end):
     width = end[0] - start[0]
     fallen = False
     if width == 0:
-        width =1
+        width = 1
     if height / width < 1.3:
         fallen = True
 
@@ -420,7 +420,8 @@ def append_new_fall_value():
 
 
 def loop():
-    UDP_IP = "localhost"
+    #UDP_IP = "localhost"
+    UDP_IP = '10.249.54.144'
     UDP_PORT = 6789
     sock = socket.socket(socket.AF_INET,  # Internet
                          socket.SOCK_DGRAM)  # UDP
@@ -487,8 +488,11 @@ def fusion(radar_detection):
             g_vid = vid[2] / sum_of_confidences
             g_radar = radar_detection[2] / sum_of_confidences
             fall_fusion = g_vid * vid[1] + g_radar * radar_detection[1]
-    confidence_fusion = sum_of_confidences / 2
-    print(round(fall_fusion,2), round(confidence_fusion,2))
+            confidence_fusion = sum_of_confidences / 2
+            print("Video   Fall: ", round(vid[1], 2), "  Conf: ", round(vid[2], 2))
+            print("Radar   Fall: ", round(radar_detection[1], 2), "    Conf: ", round(radar_detection[2], 2))
+            print("Fusion   Fall: ", round(fall_fusion, 2), "    Conf: ", round(confidence_fusion, 2))
+            print()
 
 
 
