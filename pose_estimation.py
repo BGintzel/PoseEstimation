@@ -404,7 +404,7 @@ def loop(radar_detection):
             mpDraw.draw_landmarks(img, results.pose_landmarks, mpPose.POSE_CONNECTIONS)
 
         img, fall, confidence = start_detection(results, img)
-        print(confidence)
+        #print(confidence)
         now = time.time()
         vid_detection.append([now, fall, confidence])
 
@@ -430,7 +430,7 @@ def fusion(radar_detection):
     vid = vid_detection_for_fusion[-1]
     sum_of_confidences = 0
     fall_fusion = 0
-
+    confidence_fusion = 0
     #print(abs(vid[0] - radar_detection[0]))
     # wenn die letzen einträge weniger als eine Sekunde auseinander liegen
     if abs(vid[0] - radar_detection[0]) < 1:
@@ -440,10 +440,10 @@ def fusion(radar_detection):
             g_radar = radar_detection[2] / sum_of_confidences
             fall_fusion = g_vid * vid[1] + g_radar * radar_detection[1]
             confidence_fusion = sum_of_confidences / 2
-            print("Video   Fall: ", round(vid[1], 2), "  Conf: ", round(vid[2], 2))
-            print("Radar   Fall: ", round(radar_detection[1], 2), "    Conf: ", round(radar_detection[2], 2))
-            print("Fusion   Fall: ", round(fall_fusion, 2), "    Conf: ", round(confidence_fusion, 2))
-            print()
+    print("Video   Fall: ", round(vid[1], 2), "  Conf: ", round(vid[2], 2))
+    print("Radar   Fall: ", round(radar_detection[1], 2), "    Conf: ", round(radar_detection[2], 2))
+    print("Fusion   Fall: ", round(fall_fusion, 2), "    Conf: ", round(confidence_fusion, 2))
+    print()
 
 
 
