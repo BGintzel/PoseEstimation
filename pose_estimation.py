@@ -191,9 +191,9 @@ def fallen(start, end):
     height = end[1] - start[1]
     width = end[0] - start[0]
     fallen = False
-    if height / width < 1.3:
-        fallen = True
-
+    if width != 0:
+        if height / width < 1.3:
+            fallen = True
     return fallen
 
 
@@ -332,6 +332,7 @@ def check_lights(img_loc, threshold=50, minimum=30):
         conf = 1
     if conf < 0:
         conf = 0
+
     return conf
 
 
@@ -341,7 +342,12 @@ def calculate_confidence(img_loc, lm_list):
     if len(lm_list) == 0:
         return conf
     else:
-        return conf * len(lm_list) / 33
+        conf = conf * len(lm_list) / 20
+        if conf > 1:
+            conf = 1
+        if conf < 0:
+            conf = 0
+        return conf
 
 
 ##################################################################################################
@@ -358,10 +364,10 @@ def receive_per_udp(udp_ip, udp_port, radar_detection):
         data, addr = sock.recvfrom(1024)  # buffer size is 1024 bytes
         message_json = data.decode()  # this is just a string
         message_dict = json.loads(message_json)
-        radar_detection[0] = float(message_dict["time_stamp"])
+        radar_detection[0] = time.time()
         radar_detection[1] = float(message_dict["fall_value"])
         radar_detection[2] = float(message_dict["confidence"])
-        #print(radar_detection[0])
+        #print(radar_detection[0], radar_detection[1], radar_detection[2])
 
 
 def append_new_fall_value():
@@ -398,6 +404,7 @@ def loop(radar_detection):
             mpDraw.draw_landmarks(img, results.pose_landmarks, mpPose.POSE_CONNECTIONS)
 
         img, fall, confidence = start_detection(results, img)
+        print(confidence)
         now = time.time()
         vid_detection.append([now, fall, confidence])
 
@@ -423,8 +430,7 @@ def fusion(radar_detection):
     vid = vid_detection_for_fusion[-1]
     sum_of_confidences = 0
     fall_fusion = 0
-    #print("vid: ", vid[0])
-    #print("rad: ", radar_detection[0])
+
     #print(abs(vid[0] - radar_detection[0]))
     # wenn die letzen einträge weniger als eine Sekunde auseinander liegen
     if abs(vid[0] - radar_detection[0]) < 1:
@@ -433,13 +439,16 @@ def fusion(radar_detection):
             g_vid = vid[2] / sum_of_confidences
             g_radar = radar_detection[2] / sum_of_confidences
             fall_fusion = g_vid * vid[1] + g_radar * radar_detection[1]
-    confidence_fusion = sum_of_confidences / 2
-    print(round(fall_fusion,2), round(confidence_fusion,2))
+            confidence_fusion = sum_of_confidences / 2
+            print("Video   Fall: ", round(vid[1], 2), "  Conf: ", round(vid[2], 2))
+            print("Radar   Fall: ", round(radar_detection[1], 2), "    Conf: ", round(radar_detection[2], 2))
+            print("Fusion   Fall: ", round(fall_fusion, 2), "    Conf: ", round(confidence_fusion, 2))
+            print()
 
 
 
 if __name__ == "__main__":
-    UDP_IP = "localhost"
+    UDP_IP = "10.249.5.17"
     UDP_PORT = 6789
 
     radar_detection = multiprocessing.Array('d', 3, lock=multiprocessing.Lock())
