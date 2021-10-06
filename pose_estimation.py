@@ -61,7 +61,9 @@ class KalmanFilter:
 boxes = deque(10 * [[0, 0, 0]], 10)
 vid_detection_for_fusion = deque(10 * [[0.0, 0.0, 0.0]], 10)
 vid_detection = deque(10 * [[0.0, 0.0, 0.0]], 10)
-KF = KalmanFilter(0,0)
+KF_lines = KalmanFilter(0,0)
+KF_box = KalmanFilter(0,0)
+KF_lm = KalmanFilter(0,0)
 fall_counter = 0
 counter_locked = False
 
@@ -116,14 +118,15 @@ def plot_right_leg(frame, keypoints, vector, color):
 def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value, latest_fusion_values_loc):
     global fall_counter
     if len(lm_list) > 1:
-        """if box_fall > 0.5:
+        """
+        if box_fall > 0.5:
             text = "Box: gefallen  " + str(round(box_fall,3))
             color = (0, 0, 255)
         else:
             text = "Box: Steht noch  " + str(round(box_fall,3))
             color = (0, 255, 0)
-        img_loc = plot_text(img_loc, text, color, (20, 30))
-
+        img_loc = plot_text(img_loc, text, color, (20, 150))
+        
         if lines_fall > 0.5:
             text = "Lines: gefallen  " + str(round(lines_fall,3))
             color = (0, 0, 255)
@@ -131,15 +134,16 @@ def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_
             text = "Lines: Steht noch  " + str(round(lines_fall,3))
             color = (0, 255, 0)
         img_loc = plot_text(img_loc, text, color, (20, 60))
-
+        
         if lm_fall > 0.5:
             text = "LM: gefallen  " + str(round(lm_fall,3))
             color = (0, 0, 255)
         else:
             text = "LM: Steht noch " + str(round(lm_fall,3))
             color = (0, 255, 0)
-        img_loc = plot_text(img_loc, text, color, (20, 90))
+        img_loc = plot_text(img_loc, text, color, (20, 150))
 
+        
         if fall_value > 0.5:
             text = "Overall: gefallen  " + str(round(fall_value,3))
             color = (0, 0, 255)
@@ -148,7 +152,7 @@ def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_
             color = (0, 255, 0)
         img_loc = plot_text(img_loc, text, color, (20, 120))"""
 
-        if boxes[-1][2]:
+        if boxes[-1][2] > 0.5:
             color = (0, 0, 255)
         else:
             color = (0, 255, 0)
@@ -201,14 +205,18 @@ def start_detection(results_loc, img_loc, latest_fusion_values_loc):
         # bounding box: Value [0,1] ###
         start, end = get_bounding_box(lm_list)
         box_fall = detect_box_fall(start, end)
+        KF_box.iterate(box_fall, 1)
+        box_fall = KF_box.x[0]
 
         # lines: Value [0,1]  ###
         lines_fall = fall_detection_lines(results_loc, img_loc)
-        KF.iterate(lines_fall, 1)
-        lines_fall = KF.x[0]
+        KF_lines.iterate(lines_fall, 1)
+        lines_fall = KF_lines.x[0]
 
         # landmarks: Value [0,1]  ###
         lm_fall = detect_lm_fall(lm_list, img_loc)
+        KF_lm.iterate(lm_fall, 1)
+        lm_fall = KF_lm.x[0]
 
         fall_value = calculate_fall_value(box_fall, lines_fall, lm_fall)
 
@@ -264,11 +272,11 @@ def get_bounding_box(list_loc):
 def fallen(start, end):
     height = end[1] - start[1]
     width = end[0] - start[0]
-    fallen = False
+    fallen = 0
     if width == 0:
         width = 1
-    if height / width < 1.3:
-        fallen = True
+
+    fallen = np.clip((width/height - 1/4)/(1.05) ,0,1)
 
     return fallen
 
@@ -282,13 +290,13 @@ def save_boxes(start, end):
 def detect_box_fall(start, end):
     counter = 0
 
-    for box in boxes:
-        if box[2]:
-            counter += 1
+        #for box in boxes:
+        #if box[2]:
+        #    counter += 1
 
-    fall_value = counter / len(boxes)
+        #fall_value = counter / len(boxes)
 
-    return fall_value
+    return boxes[-1][2]
 
 
 # fall detection lines #######################################################################
@@ -463,6 +471,7 @@ def loop():
     cap = cv2.VideoCapture(0)
     current = time.time()
     latest_fusion_values = 0, 0, 0, 0 ,0 ,0
+    out = cv2.VideoWriter('outpy.avi',cv2.VideoWriter_fourcc('M','J','P','G'), 10, (1280,720))
 
     while True:
         
@@ -489,6 +498,7 @@ def loop():
             current = time.time()
 
         update_counter(latest_fusion_values)
+        out.write(img)
         cv2.imshow("Image", img)
         if cv2.waitKey(1) == ord('q'):
             break
@@ -496,6 +506,7 @@ def loop():
     cap.release()
     cv2.destroyAllWindows()
     cv2.waitKey(1)
+    out.release()
 
 
 ##################################################################################################
@@ -506,6 +517,7 @@ def loop():
 def fusion(radar_detection, img_loc):
     vid = vid_detection_for_fusion[-1]
     sum_of_confidences = 0
+    confidence_fusion = 0
     fall_fusion = 0
     #print("vid: ", vid[0])
     #print("rad: ", radar_detection[0])
