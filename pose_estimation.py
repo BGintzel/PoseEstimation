@@ -11,6 +11,7 @@ import mediapipe as mp
 import numpy as np
 from numpy.linalg import inv
 
+
 ##### Kalman #################################################################################
 
 class KalmanFilter:
@@ -18,41 +19,41 @@ class KalmanFilter:
         velocity = 0
         self.x = np.array([fall_value, velocity])
         self.P = np.array([
-                           [1/(confidence+1e-6),0],
-                           [0, 1000]
-                           ])
+            [1 / (confidence + 1e-6), 0],
+            [0, 1000]
+        ])
         self.prev_time_stamp = time.time()
-    
+
     def iterate(self, new_fall_value, new_confidence):
-        #prediction
+        # prediction
         next_time_stamp = time.time()
         delta_t = next_time_stamp - self.prev_time_stamp
         F = np.array([
-                      [1, delta_t],
-                      [0, 1]
-                      ])
-        #low sigma->high inertia
+            [1, delta_t],
+            [0, 1]
+        ])
+        # low sigma->high inertia
         Sigma = 0.9
-        D = Sigma**2 * np.array([
-                                [1/4*delta_t**4, 1/2*delta_t**3],
-                                [1/2*delta_t**3, delta_t**2]
-                                ])
+        D = Sigma ** 2 * np.array([
+            [1 / 4 * delta_t ** 4, 1 / 2 * delta_t ** 3],
+            [1 / 2 * delta_t ** 3, delta_t ** 2]
+        ])
         self.prev_time_stamp = next_time_stamp
-        self.x = F@self.x
+        self.x = F @ self.x
         self.P = F @ self.P @ F.T + D
-                      
-                      
-        #filtering
+
+        # filtering
         new_x = np.array([new_fall_value, 0])
         new_P = np.array([
-                        [1/(new_confidence+1e-6), 0],
-                        [0, 1000]
-                        ])
+            [1 / (new_confidence + 1e-6), 0],
+            [0, 1000]
+        ])
         filtered_P = inv(inv(self.P) + inv(new_P))
-        filtered_x = filtered_P@(inv(self.P)@self.x + inv(new_P)@new_x)
-                      
-        self.x = np.clip(filtered_x,0,1)
+        filtered_x = filtered_P @ (inv(self.P) @ self.x + inv(new_P) @ new_x)
+
+        self.x = np.clip(filtered_x, 0, 1)
         self.P = filtered_P
+
 
 ##############################################################################################
 
@@ -61,9 +62,9 @@ class KalmanFilter:
 boxes = deque(10 * [[0, 0, 0]], 10)
 vid_detection_for_fusion = deque(10 * [[0.0, 0.0, 0.0]], 10)
 vid_detection = deque(10 * [[0.0, 0.0, 0.0]], 10)
-KF_lines = KalmanFilter(0,0)
-KF_box = KalmanFilter(0,0)
-KF_lm = KalmanFilter(0,0)
+KF_lines = KalmanFilter(0, 0)
+KF_box = KalmanFilter(0, 0)
+KF_lm = KalmanFilter(0, 0)
 fall_counter = 0
 counter_locked = False
 
@@ -126,7 +127,7 @@ def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_
             text = "Box: Steht noch  " + str(round(box_fall,3))
             color = (0, 255, 0)
         img_loc = plot_text(img_loc, text, color, (20, 150))
-        
+
         if lines_fall > 0.5:
             text = "Lines: gefallen  " + str(round(lines_fall,3))
             color = (0, 0, 255)
@@ -134,7 +135,7 @@ def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_
             text = "Lines: Steht noch  " + str(round(lines_fall,3))
             color = (0, 255, 0)
         img_loc = plot_text(img_loc, text, color, (20, 60))
-        
+
         if lm_fall > 0.5:
             text = "LM: gefallen  " + str(round(lm_fall,3))
             color = (0, 0, 255)
@@ -143,7 +144,7 @@ def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_
             color = (0, 255, 0)
         img_loc = plot_text(img_loc, text, color, (20, 150))
 
-        
+
         if fall_value > 0.5:
             text = "Overall: gefallen  " + str(round(fall_value,3))
             color = (0, 0, 255)
@@ -158,31 +159,30 @@ def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_
             color = (0, 255, 0)
         img_loc = cv2.rectangle(img_loc, start, end, color, thickness=3)
         # img_loc = plot_text(img_loc, text, color, (20, 200))
-        
-        
+
         video_fall, video_confidence, radar_fall, radar_confidence, fusion_fall, fusion_confidence = latest_fusion_values_loc
-        
+
         video_text = "Video   Fall: " + str(round(video_fall, 2)) + "  Conf: " + str(round(video_confidence, 2))
         radar_text = "Radar   Fall: " + str(round(radar_fall, 2)) + "    Conf: " + str(round(radar_confidence, 2))
         fusion_text = "Fusion   Fall: " + str(round(fusion_fall, 2)) + "    Conf: " + str(round(fusion_confidence, 2))
-    
+
         if video_fall > 0.5:
-            color = (0,0,255)
+            color = (0, 0, 255)
         else:
-            color = (0,255,0)
-        plot_text(img_loc, video_text, color, (20,30))
+            color = (0, 255, 0)
+        plot_text(img_loc, video_text, color, (20, 30))
         if radar_fall > 0.5:
-            color = (0,0,255)
+            color = (0, 0, 255)
         else:
-            color = (0,255,0)
-        plot_text(img_loc, radar_text, color, (20,60))
+            color = (0, 255, 0)
+        plot_text(img_loc, radar_text, color, (20, 60))
         if fusion_fall > 0.5:
-            color = (0,0,255)
+            color = (0, 0, 255)
         else:
-            color = (0,255,0)
-        plot_text(img_loc, fusion_text, color, (20,90))
-            
-        plot_text(img_loc, str(fall_counter), (255,255,255), (img_loc.shape[1] - 40, 30))
+            color = (0, 255, 0)
+        plot_text(img_loc, fusion_text, color, (20, 90))
+
+        plot_text(img_loc, str(fall_counter), (255, 255, 255), (img_loc.shape[1] - 40, 30))
 
     return img_loc
 
@@ -192,7 +192,6 @@ def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_
 # fall detection functions ###################################################################
 
 def calculate_fall_value(box_fall, lines_fall, lm_fall, box_weighting=1 / 3, lines_weighting=1 / 3, lm_weighting=1 / 3):
-
     return box_fall * box_weighting + lines_fall * lines_weighting + lm_fall * lm_weighting
 
 
@@ -220,7 +219,8 @@ def start_detection(results_loc, img_loc, latest_fusion_values_loc):
 
         fall_value = calculate_fall_value(box_fall, lines_fall, lm_fall)
 
-        img_loc = setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value, latest_fusion_values_loc)
+        img_loc = setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value,
+                            latest_fusion_values_loc)
         save_boxes(start, end)
     else:
         lm_list = []
@@ -276,7 +276,7 @@ def fallen(start, end):
     if width == 0:
         width = 1
 
-    fallen = np.clip((width/height - 1/4)/(1.05) ,0,1)
+    fallen = np.clip((width / height - 1 / 4) / (1.05), 0, 1)
 
     return fallen
 
@@ -290,11 +290,11 @@ def save_boxes(start, end):
 def detect_box_fall(start, end):
     counter = 0
 
-        #for box in boxes:
-        #if box[2]:
-        #    counter += 1
+    # for box in boxes:
+    # if box[2]:
+    #    counter += 1
 
-        #fall_value = counter / len(boxes)
+    # fall_value = counter / len(boxes)
 
     return boxes[-1][2]
 
@@ -329,8 +329,8 @@ def find_right_leg(keypoints):
 
 
 def find_orientation(line):
-    #scalar from [-1,1] -1 if upright, 0 if horizontal, 1 if upside down
-    orientation = np.arctan2(line[1] , np.abs(line[0])) / (np.pi/2)
+    # scalar from [-1,1] -1 if upright, 0 if horizontal, 1 if upside down
+    orientation = np.arctan2(line[1], np.abs(line[0])) / (np.pi / 2)
     return orientation
 
 
@@ -339,11 +339,11 @@ def fall_detection_lines(results, frame):
     upper_body = find_upper_body(keypoints)
     left_leg = find_left_leg(keypoints)
     right_leg = find_right_leg(keypoints)
-    
+
     upper_body_orientation = find_orientation(upper_body)
-    left_leg_orientation = np.clip(find_orientation(left_leg),-1,0.2)
-    right_leg_orientation = np.clip(find_orientation(right_leg),-1,0.2)
-    
+    left_leg_orientation = np.clip(find_orientation(left_leg), -1, 0.2)
+    right_leg_orientation = np.clip(find_orientation(right_leg), -1, 0.2)
+
     upper_body_is_not_upright = upper_body_orientation > -0.5
     if upper_body_is_not_upright:
         color = (0, 0, 255)
@@ -357,21 +357,19 @@ def fall_detection_lines(results, frame):
     else:
         color = (0, 255, 0)
     plot_left_leg(frame, keypoints, left_leg, color)
-    
+
     right_leg_is_not_upright = right_leg_orientation > -0.5
     if right_leg_is_not_upright:
         color = (0, 0, 255)
     else:
         color = (0, 255, 0)
     plot_right_leg(frame, keypoints, right_leg, color)
-    
-    
-    fall_value = (1/3)*(upper_body_orientation + left_leg_orientation + right_leg_orientation)
-    fall_value = fall_value+1
-    fall_value = np.clip(fall_value,0,1)
-    
-    return fall_value
 
+    fall_value = (1 / 3) * (upper_body_orientation + left_leg_orientation + right_leg_orientation)
+    fall_value = fall_value + 1
+    fall_value = np.clip(fall_value, 0, 1)
+
+    return fall_value
 
 
 # fall detection landmarks ###################################################################
@@ -427,15 +425,15 @@ def calculate_confidence(img_loc, lm_list):
 
 
 def receive_per_udp(sock):
-    timeout=0.01
+    timeout = 0.01
     inputs = [sock]
     outputs = []
-    
+
     readable, writable, exceptional = select.select(inputs, outputs, inputs, timeout)
     if not readable:
         return None
     for readable_socket in readable:
-        data, addr = readable_socket.recvfrom(1024) # buffer size is 1024 bytes
+        data, addr = readable_socket.recvfrom(1024)  # buffer size is 1024 bytes
         message_json = data.decode()
         message_dict = json.loads(message_json)
         radar_detection = message_dict
@@ -458,23 +456,23 @@ def append_new_fall_value():
 
 def loop():
     UDP_IP = '192.168.242.148'
-    #UDP_IP = '10.249.54.144'
+    # UDP_IP = '10.249.54.144'
     UDP_PORT = 6789
     sock = socket.socket(socket.AF_INET,  # Internet
                          socket.SOCK_DGRAM)  # UDP
     sock.bind((UDP_IP, UDP_PORT))
-    newest_radar_detection = [0,0,0] #initialize with 0 until acutal data arrives
-    
+    newest_radar_detection = [0, 0, 0]  # initialize with 0 until acutal data arrives
+
     mpDraw = mp.solutions.drawing_utils
     mpPose = mp.solutions.pose
     pose = mpPose.Pose()
     cap = cv2.VideoCapture(0)
     current = time.time()
-    latest_fusion_values = 0, 0, 0, 0 ,0 ,0
-    out = cv2.VideoWriter('outpy.avi',cv2.VideoWriter_fourcc('M','J','P','G'), 10, (1280,720))
+    latest_fusion_values = 0, 0, 0, 0, 0, 0
+    out = cv2.VideoWriter('outpy.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (1280, 720))
 
     while True:
-        
+
         success, img = cap.read()
         if not success:
             print('webcam not found')
@@ -489,7 +487,6 @@ def loop():
         now = time.time()
         vid_detection.append([now, fall, confidence])
 
-        
         radar_detection = receive_per_udp(sock)
         if radar_detection is not None:
             newest_radar_detection = radar_detection
@@ -519,9 +516,9 @@ def fusion(radar_detection, img_loc):
     sum_of_confidences = 0
     confidence_fusion = 0
     fall_fusion = 0
-    #print("vid: ", vid[0])
-    #print("rad: ", radar_detection[0])
-    #print(abs(vid[0] - radar_detection[0]))
+    # print("vid: ", vid[0])
+    # print("rad: ", radar_detection[0])
+    # print(abs(vid[0] - radar_detection[0]))
     # wenn die letzen einträge weniger als eine Sekunde auseinander liegen
     sum_of_confidences = vid[2] + radar_detection[2]
     if sum_of_confidences != 0:
@@ -529,14 +526,12 @@ def fusion(radar_detection, img_loc):
         g_radar = radar_detection[2] / sum_of_confidences
         fall_fusion = g_vid * vid[1] + g_radar * radar_detection[1]
         confidence_fusion = sum_of_confidences / 2
-    
 
-
-        #print("Video   Fall: ", round(vid[1], 2), "  Conf: ", round(vid[2], 2))
-        #print("Radar   Fall: ", round(radar_detection[1], 2), "    Conf: ", round(radar_detection[2], 2))
-        #print("Fusion   Fall: ", round(fall_fusion, 2), "    Conf: ", round(confidence_fusion, 2))
-        #print()
-    return vid[1], vid[2]  , radar_detection[1], radar_detection[2], fall_fusion, confidence_fusion
+        # print("Video   Fall: ", round(vid[1], 2), "  Conf: ", round(vid[2], 2))
+        # print("Radar   Fall: ", round(radar_detection[1], 2), "    Conf: ", round(radar_detection[2], 2))
+        # print("Fusion   Fall: ", round(fall_fusion, 2), "    Conf: ", round(confidence_fusion, 2))
+        # print()
+    return vid[1], vid[2], radar_detection[1], radar_detection[2], fall_fusion, confidence_fusion
 
 
 def update_counter(latest_fusion_values_loc):
@@ -549,6 +544,7 @@ def update_counter(latest_fusion_values_loc):
     else:
         if fusion_fall < 0.1:
             counter_locked = False
+
 
 if __name__ == "__main__":
     loop()
