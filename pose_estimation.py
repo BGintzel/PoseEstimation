@@ -160,29 +160,31 @@ def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_
         img_loc = cv2.rectangle(img_loc, start, end, color, thickness=3)
         # img_loc = plot_text(img_loc, text, color, (20, 200))
 
-        video_fall, video_confidence, radar_fall, radar_confidence, fusion_fall, fusion_confidence = latest_fusion_values_loc
+    video_fall, video_confidence, radar_fall, radar_confidence, fusion_fall, fusion_confidence = latest_fusion_values_loc
 
-        video_text = "Video   Fall: " + str(round(video_fall, 2)) + "  Conf: " + str(round(video_confidence, 2))
-        radar_text = "Radar   Fall: " + str(round(radar_fall, 2)) + "    Conf: " + str(round(radar_confidence, 2))
-        fusion_text = "Fusion   Fall: " + str(round(fusion_fall, 2)) + "    Conf: " + str(round(fusion_confidence, 2))
+    video_text = "Video   Fall: " + str(round(video_fall, 2)) + "  Conf: " + str(round(video_confidence, 2))
+    radar_text = "Radar   Fall: " + str(round(radar_fall, 2)) + "    Conf: " + str(round(radar_confidence, 2))
+    fusion_text = "Fusion   Fall: " + str(round(fusion_fall, 2)) + "    Conf: " + str(round(fusion_confidence, 2))
 
-        if video_fall > 0.5:
-            color = (0, 0, 255)
-        else:
-            color = (0, 255, 0)
-        plot_text(img_loc, video_text, color, (20, 30))
-        if radar_fall > 0.5:
-            color = (0, 0, 255)
-        else:
-            color = (0, 255, 0)
-        plot_text(img_loc, radar_text, color, (20, 60))
-        if fusion_fall > 0.5:
-            color = (0, 0, 255)
-        else:
-            color = (0, 255, 0)
-        plot_text(img_loc, fusion_text, color, (20, 90))
+    if video_fall > 0.5:
+        color = (0, 0, 255)
+    else:
+        color = (0, 255, 0)
+    plot_text(img_loc, video_text, color, (20, 30))
+    if radar_fall < 0:
+        color = (0,255,255)
+    elif radar_fall > 0.5:
+        color = (0, 0, 255)
+    else:
+        color = (0, 255, 0)
+    plot_text(img_loc, radar_text, color, (20, 60))
+    if fusion_fall > 0.5:
+        color = (0, 0, 255)
+    else:
+        color = (0, 255, 0)
+    plot_text(img_loc, fusion_text, color, (20, 90))
 
-        plot_text(img_loc, str(fall_counter), (255, 255, 255), (img_loc.shape[1] - 40, 30))
+    plot_text(img_loc, str(fall_counter), (255, 255, 255), (img_loc.shape[1] - 40, 30))
 
     return img_loc
 
@@ -198,6 +200,7 @@ def calculate_fall_value(box_fall, lines_fall, lm_fall, box_weighting=1 / 3, lin
 def start_detection(results_loc, img_loc, latest_fusion_values_loc):
     global boxes
     fall_value = 0
+    start, end, box_fall, lines_fall, lm_fall = 0,0,0,0,0
     if results_loc.pose_landmarks:
         lm_list = get_list(results_loc, img_loc)
 
@@ -219,11 +222,12 @@ def start_detection(results_loc, img_loc, latest_fusion_values_loc):
 
         fall_value = calculate_fall_value(box_fall, lines_fall, lm_fall)
 
-        img_loc = setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value,
-                            latest_fusion_values_loc)
         save_boxes(start, end)
     else:
         lm_list = []
+    
+    img_loc = setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value,
+                        latest_fusion_values_loc)
 
     conf = calculate_confidence(img_loc, lm_list)
 
@@ -275,6 +279,8 @@ def fallen(start, end):
     fallen = 0
     if width == 0:
         width = 1
+    if height == 0:
+        height = 1
 
     fallen = np.clip((width / height - 1 / 4) / (1.05), 0, 1)
 
@@ -375,18 +381,20 @@ def fall_detection_lines(results, frame):
 # fall detection landmarks ###################################################################
 
 def detect_lm_fall(lm_list, img_loc):
-    min = 10 * (len(lm_list) / 33)
-    max_value = (len(lm_list) - min) / len(lm_list)
-    h, w, c = img_loc.shape
-    under_half = 0
-    for lm in lm_list:
-        if lm[2] > h * 0.5:
-            under_half += 1
+    fall_value = 0
+    if len(lm_list) > 0:
+        min = 10 * (len(lm_list) / 33)
+        max_value = (len(lm_list) - min) / len(lm_list)
+        h, w, c = img_loc.shape
+        under_half = 0
+        for lm in lm_list:
+            if lm[2] > h * 0.5:
+                under_half += 1
 
-    fall_value = ((under_half - min) / len(lm_list)) / max_value
+        fall_value = ((under_half - min) / len(lm_list)) / max_value
 
-    if fall_value < 0:
-        fall_value = 0
+        if fall_value < 0:
+            fall_value = 0
 
     return fall_value
 
@@ -455,7 +463,7 @@ def append_new_fall_value():
 
 
 def loop():
-    UDP_IP = '192.168.242.148'
+    UDP_IP = 'localhost'
     # UDP_IP = '10.249.54.144'
     UDP_PORT = 6789
     sock = socket.socket(socket.AF_INET,  # Internet
@@ -469,7 +477,7 @@ def loop():
     cap = cv2.VideoCapture(0)
     current = time.time()
     latest_fusion_values = 0, 0, 0, 0, 0, 0
-    out = cv2.VideoWriter('outpy.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (1280, 720))
+    #out = cv2.VideoWriter('outpy.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (1280, 720))
 
     while True:
 
@@ -488,14 +496,15 @@ def loop():
         vid_detection.append([now, fall, confidence])
 
         radar_detection = receive_per_udp(sock)
+        new_radar_is_valid = radar_detection is not None
         if radar_detection is not None:
             newest_radar_detection = radar_detection
-            append_new_fall_value()
-            latest_fusion_values = fusion(newest_radar_detection, img)
             current = time.time()
+        append_new_fall_value()
+        latest_fusion_values = fusion(newest_radar_detection, img, new_radar_is_valid)
 
         update_counter(latest_fusion_values)
-        out.write(img)
+        #out.write(img)
         cv2.imshow("Image", img)
         if cv2.waitKey(1) == ord('q'):
             break
@@ -503,7 +512,7 @@ def loop():
     cap.release()
     cv2.destroyAllWindows()
     cv2.waitKey(1)
-    out.release()
+    #out.release()
 
 
 ##################################################################################################
@@ -511,7 +520,10 @@ def loop():
 
 # fusion ######################################################################################
 
-def fusion(radar_detection, img_loc):
+def fusion(radar_detection, img_loc, new_radar_is_valid):
+    if not new_radar_is_valid:
+        radar_detection[2] = 0
+        radar_detection[1] = -1
     vid = vid_detection_for_fusion[-1]
     sum_of_confidences = 0
     confidence_fusion = 0
