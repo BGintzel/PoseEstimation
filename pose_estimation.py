@@ -172,7 +172,7 @@ def setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_
         color = (0, 255, 0)
     plot_text(img_loc, video_text, color, (20, 30))
     if radar_fall < 0:
-        color = (0,255,255)
+        color = (0, 255, 255)
     elif radar_fall > 0.5:
         color = (0, 0, 255)
     else:
@@ -200,7 +200,7 @@ def calculate_fall_value(box_fall, lines_fall, lm_fall, box_weighting=1 / 3, lin
 def start_detection(results_loc, img_loc, latest_fusion_values_loc):
     global boxes
     fall_value = 0
-    start, end, box_fall, lines_fall, lm_fall = 0,0,0,0,0
+    start, end, box_fall, lines_fall, lm_fall = 0, 0, 0, 0, 0
     if results_loc.pose_landmarks:
         lm_list = get_list(results_loc, img_loc)
 
@@ -225,7 +225,7 @@ def start_detection(results_loc, img_loc, latest_fusion_values_loc):
         save_boxes(start, end)
     else:
         lm_list = []
-    
+
     img_loc = setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value,
                         latest_fusion_values_loc)
 
@@ -463,7 +463,7 @@ def append_new_fall_value():
 
 
 def loop():
-    UDP_IP = 'localhost'
+    UDP_IP = '192.168.203.225'
     # UDP_IP = '10.249.54.144'
     UDP_PORT = 6789
     sock = socket.socket(socket.AF_INET,  # Internet
@@ -477,7 +477,7 @@ def loop():
     cap = cv2.VideoCapture(0)
     current = time.time()
     latest_fusion_values = 0, 0, 0, 0, 0, 0
-    #out = cv2.VideoWriter('outpy.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (1280, 720))
+    # out = cv2.VideoWriter('outpy.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (1280, 720))
 
     while True:
 
@@ -504,7 +504,7 @@ def loop():
         latest_fusion_values = fusion(newest_radar_detection, img, new_radar_is_valid)
 
         update_counter(latest_fusion_values)
-        #out.write(img)
+        # out.write(img)
         cv2.imshow("Image", img)
         if cv2.waitKey(1) == ord('q'):
             break
@@ -512,7 +512,7 @@ def loop():
     cap.release()
     cv2.destroyAllWindows()
     cv2.waitKey(1)
-    #out.release()
+    # out.release()
 
 
 ##################################################################################################
@@ -521,7 +521,8 @@ def loop():
 # fusion ######################################################################################
 
 def fusion(radar_detection, img_loc, new_radar_is_valid):
-    if not new_radar_is_valid:
+    print(time.time()-radar_detection[0])
+    if not new_radar_is_valid and time.time()-radar_detection[0]>3:
         radar_detection[2] = 0
         radar_detection[1] = -1
     vid = vid_detection_for_fusion[-1]
@@ -560,4 +561,3 @@ def update_counter(latest_fusion_values_loc):
 
 if __name__ == "__main__":
     loop()
-
