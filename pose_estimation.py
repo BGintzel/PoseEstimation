@@ -506,7 +506,7 @@ def loop():
         update_counter(latest_fusion_values)
         # out.write(img)
         img = cv2.resize(img, (int(1000.0 * 1.333333), 1000))
-        print(img.shape)
+        #print(img.shape)
         cv2.imshow("Image", img)
         if cv2.waitKey(1) == ord('q'):
             break
