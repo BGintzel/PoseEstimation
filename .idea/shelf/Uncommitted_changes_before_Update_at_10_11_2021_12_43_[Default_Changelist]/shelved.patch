@@ -1,0 +1,290 @@
+Index: pose_estimation.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import socket\r\nimport json\r\nimport time\r\nimport multiprocessing\r\nimport select\r\n\r\nfrom collections import deque\r\n\r\nimport cv2\r\nimport mediapipe as mp\r\nimport numpy as np\r\nfrom numpy.linalg import inv\r\n\r\n\r\n##### Kalman #################################################################################\r\n\r\nclass KalmanFilter:\r\n    def __init__(self, fall_value, confidence):\r\n        velocity = 0\r\n        self.x = np.array([fall_value, velocity])\r\n        self.P = np.array([\r\n            [1 / (confidence + 1e-6), 0],\r\n            [0, 1000]\r\n        ])\r\n        self.prev_time_stamp = time.time()\r\n\r\n    def iterate(self, new_fall_value, new_confidence):\r\n        # prediction\r\n        next_time_stamp = time.time()\r\n        delta_t = next_time_stamp - self.prev_time_stamp\r\n        F = np.array([\r\n            [1, delta_t],\r\n            [0, 1]\r\n        ])\r\n        # low sigma->high inertia\r\n        Sigma = 0.9\r\n        D = Sigma ** 2 * np.array([\r\n            [1 / 4 * delta_t ** 4, 1 / 2 * delta_t ** 3],\r\n            [1 / 2 * delta_t ** 3, delta_t ** 2]\r\n        ])\r\n        self.prev_time_stamp = next_time_stamp\r\n        self.x = F @ self.x\r\n        self.P = F @ self.P @ F.T + D\r\n\r\n        # filtering\r\n        new_x = np.array([new_fall_value, 0])\r\n        new_P = np.array([\r\n            [1 / (new_confidence + 1e-6), 0],\r\n            [0, 1000]\r\n        ])\r\n        filtered_P = inv(inv(self.P) + inv(new_P))\r\n        filtered_x = filtered_P @ (inv(self.P) @ self.x + inv(new_P) @ new_x)\r\n\r\n        self.x = np.clip(filtered_x, 0, 1)\r\n        self.P = filtered_P\r\n\r\n\r\n##############################################################################################\r\n\r\n# global  ####################################################################################\r\n\r\nboxes = deque(10 * [[0, 0, 0]], 10)\r\nvid_detection_for_fusion = deque(10 * [[0.0, 0.0, 0.0]], 10)\r\nvid_detection = deque(10 * [[0.0, 0.0, 0.0]], 10)\r\nKF_lines = KalmanFilter(0, 0)\r\nKF_box = KalmanFilter(0, 0)\r\nKF_lm = KalmanFilter(0, 0)\r\nfall_counter = 0\r\ncounter_locked = False\r\n\r\n\r\n##############################################################################################\r\n\r\n# helper functions plotting ##################################################################\r\n\r\n\r\ndef plot_text(frame, text, color, pos=(50, 50)):\r\n    font = cv2.FONT_HERSHEY_SIMPLEX\r\n    position = pos\r\n    fontScale = 1\r\n    thickness = 2\r\n    frame = cv2.putText(frame, text, position, font, fontScale, color, thickness, cv2.LINE_AA)\r\n    return frame\r\n\r\n\r\ndef plot_upper_body(frame, keypoints, vector, color):\r\n    startx = int(0.5 * (keypoints[24, 0] + keypoints[23, 0]))\r\n    starty = int(0.5 * (keypoints[24, 1] + keypoints[23, 1]))\r\n    start = (startx, starty)\r\n    endx = int(startx + vector[0])\r\n    endy = int(starty + vector[1])\r\n    end = (endx, endy)\r\n    thickness = 2\r\n    cv2.line(frame, start, end, color, thickness)\r\n\r\n\r\ndef plot_left_leg(frame, keypoints, vector, color):\r\n    startx = int(keypoints[27, 0])\r\n    starty = int(keypoints[27, 1])\r\n    start = (startx, starty)\r\n    endx = int(startx + vector[0])\r\n    endy = int(starty + vector[1])\r\n    end = (endx, endy)\r\n    thickness = 2\r\n    cv2.line(frame, start, end, color, thickness)\r\n\r\n\r\ndef plot_right_leg(frame, keypoints, vector, color):\r\n    startx = int(keypoints[28, 0])\r\n    starty = int(keypoints[28, 1])\r\n    start = (startx, starty)\r\n    endx = int(startx + vector[0])\r\n    endy = int(starty + vector[1])\r\n    end = (endx, endy)\r\n    thickness = 2\r\n    cv2.line(frame, start, end, color, thickness)\r\n\r\n\r\ndef setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value, latest_fusion_values_loc):\r\n    global fall_counter\r\n    if len(lm_list) > 1:\r\n        \"\"\"\r\n        if box_fall > 0.5:\r\n            text = \"Box: gefallen  \" + str(round(box_fall,3))\r\n            color = (0, 0, 255)\r\n        else:\r\n            text = \"Box: Steht noch  \" + str(round(box_fall,3))\r\n            color = (0, 255, 0)\r\n        img_loc = plot_text(img_loc, text, color, (20, 150))\r\n\r\n        if lines_fall > 0.5:\r\n            text = \"Lines: gefallen  \" + str(round(lines_fall,3))\r\n            color = (0, 0, 255)\r\n        else:\r\n            text = \"Lines: Steht noch  \" + str(round(lines_fall,3))\r\n            color = (0, 255, 0)\r\n        img_loc = plot_text(img_loc, text, color, (20, 60))\r\n\r\n        if lm_fall > 0.5:\r\n            text = \"LM: gefallen  \" + str(round(lm_fall,3))\r\n            color = (0, 0, 255)\r\n        else:\r\n            text = \"LM: Steht noch \" + str(round(lm_fall,3))\r\n            color = (0, 255, 0)\r\n        img_loc = plot_text(img_loc, text, color, (20, 150))\r\n\r\n\r\n        if fall_value > 0.5:\r\n            text = \"Overall: gefallen  \" + str(round(fall_value,3))\r\n            color = (0, 0, 255)\r\n        else:\r\n            text = \"Overall: Steht noch \" + str(round(fall_value,3))\r\n            color = (0, 255, 0)\r\n        img_loc = plot_text(img_loc, text, color, (20, 120))\"\"\"\r\n\r\n        if boxes[-1][2] > 0.5:\r\n            color = (0, 0, 255)\r\n        else:\r\n            color = (0, 255, 0)\r\n        img_loc = cv2.rectangle(img_loc, start, end, color, thickness=3)\r\n        # img_loc = plot_text(img_loc, text, color, (20, 200))\r\n\r\n        video_fall, video_confidence, radar_fall, radar_confidence, fusion_fall, fusion_confidence = latest_fusion_values_loc\r\n\r\n        video_text = \"Video   Fall: \" + str(round(video_fall, 2)) + \"  Conf: \" + str(round(video_confidence, 2))\r\n        radar_text = \"Radar   Fall: \" + str(round(radar_fall, 2)) + \"    Conf: \" + str(round(radar_confidence, 2))\r\n        fusion_text = \"Fusion   Fall: \" + str(round(fusion_fall, 2)) + \"    Conf: \" + str(round(fusion_confidence, 2))\r\n\r\n        if video_fall > 0.5:\r\n            color = (0, 0, 255)\r\n        else:\r\n            color = (0, 255, 0)\r\n        plot_text(img_loc, video_text, color, (20, 30))\r\n        if radar_fall > 0.5:\r\n            color = (0, 0, 255)\r\n        else:\r\n            color = (0, 255, 0)\r\n        plot_text(img_loc, radar_text, color, (20, 60))\r\n        if fusion_fall > 0.5:\r\n            color = (0, 0, 255)\r\n        else:\r\n            color = (0, 255, 0)\r\n        plot_text(img_loc, fusion_text, color, (20, 90))\r\n\r\n        plot_text(img_loc, str(fall_counter), (255, 255, 255), (img_loc.shape[1] - 40, 30))\r\n\r\n    return img_loc\r\n\r\n\r\n##############################################################################################\r\n\r\n# fall detection functions ###################################################################\r\n\r\ndef calculate_fall_value(box_fall, lines_fall, lm_fall, box_weighting=1 / 3, lines_weighting=1 / 3, lm_weighting=1 / 3):\r\n    return box_fall * box_weighting + lines_fall * lines_weighting + lm_fall * lm_weighting\r\n\r\n\r\ndef start_detection(results_loc, img_loc, latest_fusion_values_loc):\r\n    global boxes\r\n    fall_value = 0\r\n    if results_loc.pose_landmarks:\r\n        lm_list = get_list(results_loc, img_loc)\r\n\r\n        # bounding box: Value [0,1] ###\r\n        start, end = get_bounding_box(lm_list)\r\n        box_fall = detect_box_fall(start, end)\r\n        KF_box.iterate(box_fall, 1)\r\n        box_fall = KF_box.x[0]\r\n\r\n        # lines: Value [0,1]  ###\r\n        lines_fall = fall_detection_lines(results_loc, img_loc)\r\n        KF_lines.iterate(lines_fall, 1)\r\n        lines_fall = KF_lines.x[0]\r\n\r\n        # landmarks: Value [0,1]  ###\r\n        lm_fall = detect_lm_fall(lm_list, img_loc)\r\n        KF_lm.iterate(lm_fall, 1)\r\n        lm_fall = KF_lm.x[0]\r\n\r\n        fall_value = calculate_fall_value(box_fall, lines_fall, lm_fall)\r\n\r\n        img_loc = setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value,\r\n                            latest_fusion_values_loc)\r\n        save_boxes(start, end)\r\n    else:\r\n        lm_list = []\r\n\r\n    conf = calculate_confidence(img_loc, lm_list)\r\n\r\n    return img_loc, fall_value, conf\r\n\r\n\r\ndef inference(frame, pose):\r\n    # run mediapipe net on frame and output results\r\n    results = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))\r\n    return results\r\n\r\n\r\ndef get_list(results_loc, img_loc):\r\n    lm_list = []\r\n\r\n    for id, lm in enumerate(results_loc.pose_landmarks.landmark):\r\n        h, w, c = img_loc.shape\r\n        x, y = int(lm.x * w), int(lm.y * h)\r\n        if lm.visibility > 0.5 and 0.0 <= lm.x <= 1.0 and 0.0 <= lm.y <= 1.0:\r\n            lm_list.append([id, x, y, lm.visibility])\r\n\r\n    return lm_list\r\n\r\n\r\n# fall detection bounding box ################################################################\r\n\r\ndef get_bounding_box(list_loc):\r\n    x = []\r\n    y = []\r\n    start = (0, 0)\r\n    end = (0, 0)\r\n    for lm in list_loc:\r\n        x.append(lm[1])\r\n        y.append(lm[2])\r\n\r\n    if len(y) > 0 and len(x) > 0:\r\n        top = min(y)\r\n        bot = max(y)\r\n        left = min(x)\r\n        right = max(x)\r\n        start = (left, top)\r\n        end = (right, bot)\r\n    return start, end\r\n\r\n\r\ndef fallen(start, end):\r\n    height = end[1] - start[1]\r\n    width = end[0] - start[0]\r\n    fallen = 0\r\n    if width == 0:\r\n        width = 1\r\n\r\n    fallen = np.clip((width / height - 1 / 4) / (1.05), 0, 1)\r\n\r\n    return fallen\r\n\r\n\r\ndef save_boxes(start, end):\r\n    global boxes\r\n    f = fallen(start, end)\r\n    boxes.append([start, end, f])\r\n\r\n\r\ndef detect_box_fall(start, end):\r\n    counter = 0\r\n\r\n    # for box in boxes:\r\n    # if box[2]:\r\n    #    counter += 1\r\n\r\n    # fall_value = counter / len(boxes)\r\n\r\n    return boxes[-1][2]\r\n\r\n\r\n# fall detection lines #######################################################################\r\n\r\n\r\ndef results_to_keypoints(frame, results):\r\n    # output: numpy array with shape=[33,3] 33 keypoints, x,y and z\r\n    h, w, c = frame.shape\r\n    keypoints = np.zeros((33, 3))\r\n    landmark_list = results.pose_landmarks.landmark\r\n    for i, landmark in enumerate(landmark_list):\r\n        keypoints[i, 0] = landmark.x * w\r\n        keypoints[i, 1] = landmark.y * h\r\n        keypoints[i, 2] = landmark.z * w\r\n    return keypoints\r\n\r\n\r\ndef find_upper_body(keypoints):\r\n    v1 = keypoints[12] - keypoints[24]\r\n    v2 = keypoints[11] - keypoints[23]\r\n    return (v1 + v2) / 2\r\n\r\n\r\ndef find_left_leg(keypoints):\r\n    return keypoints[23] - keypoints[27]\r\n\r\n\r\ndef find_right_leg(keypoints):\r\n    return keypoints[24] - keypoints[28]\r\n\r\n\r\ndef find_orientation(line):\r\n    # scalar from [-1,1] -1 if upright, 0 if horizontal, 1 if upside down\r\n    orientation = np.arctan2(line[1], np.abs(line[0])) / (np.pi / 2)\r\n    return orientation\r\n\r\n\r\ndef fall_detection_lines(results, frame):\r\n    keypoints = results_to_keypoints(frame, results)\r\n    upper_body = find_upper_body(keypoints)\r\n    left_leg = find_left_leg(keypoints)\r\n    right_leg = find_right_leg(keypoints)\r\n\r\n    upper_body_orientation = find_orientation(upper_body)\r\n    left_leg_orientation = np.clip(find_orientation(left_leg), -1, 0.2)\r\n    right_leg_orientation = np.clip(find_orientation(right_leg), -1, 0.2)\r\n\r\n    upper_body_is_not_upright = upper_body_orientation > -0.5\r\n    if upper_body_is_not_upright:\r\n        color = (0, 0, 255)\r\n    else:\r\n        color = (0, 255, 0)\r\n    plot_upper_body(frame, keypoints, upper_body, color)\r\n\r\n    left_leg_is_not_upright = left_leg_orientation > -0.5\r\n    if left_leg_is_not_upright:\r\n        color = (0, 0, 255)\r\n    else:\r\n        color = (0, 255, 0)\r\n    plot_left_leg(frame, keypoints, left_leg, color)\r\n\r\n    right_leg_is_not_upright = right_leg_orientation > -0.5\r\n    if right_leg_is_not_upright:\r\n        color = (0, 0, 255)\r\n    else:\r\n        color = (0, 255, 0)\r\n    plot_right_leg(frame, keypoints, right_leg, color)\r\n\r\n    fall_value = (1 / 3) * (upper_body_orientation + left_leg_orientation + right_leg_orientation)\r\n    fall_value = fall_value + 1\r\n    fall_value = np.clip(fall_value, 0, 1)\r\n\r\n    return fall_value\r\n\r\n\r\n# fall detection landmarks ###################################################################\r\n\r\ndef detect_lm_fall(lm_list, img_loc):\r\n    min = 10 * (len(lm_list) / 33)\r\n    max_value = (len(lm_list) - min) / len(lm_list)\r\n    h, w, c = img_loc.shape\r\n    under_half = 0\r\n    for lm in lm_list:\r\n        if lm[2] > h * 0.5:\r\n            under_half += 1\r\n\r\n    fall_value = ((under_half - min) / len(lm_list)) / max_value\r\n\r\n    if fall_value < 0:\r\n        fall_value = 0\r\n\r\n    return fall_value\r\n\r\n\r\n##################################################################################################\r\n\r\n\r\n# confidence #####################################################################################\r\n\r\n\r\ndef check_lights(img_loc, threshold=50, minimum=30):\r\n    img_gray = cv2.cvtColor(img_loc, cv2.COLOR_BGR2GRAY)\r\n    average = img_gray.mean(axis=0).mean(axis=0)\r\n    # print(average)\r\n    conf = (average - minimum) / (threshold - minimum)\r\n    if conf > 1:\r\n        conf = 1\r\n    if conf < 0:\r\n        conf = 0\r\n    return conf\r\n\r\n\r\ndef calculate_confidence(img_loc, lm_list):\r\n    conf = check_lights(img_loc)\r\n\r\n    if len(lm_list) == 0:\r\n        return conf\r\n    else:\r\n        return conf * len(lm_list) / 33\r\n\r\n\r\n##################################################################################################\r\n\r\n\r\n# main loop ######################################################################################\r\n\r\n\r\ndef receive_per_udp(sock):\r\n    timeout = 0.01\r\n    inputs = [sock]\r\n    outputs = []\r\n\r\n    readable, writable, exceptional = select.select(inputs, outputs, inputs, timeout)\r\n    if not readable:\r\n        return None\r\n    for readable_socket in readable:\r\n        data, addr = readable_socket.recvfrom(1024)  # buffer size is 1024 bytes\r\n        message_json = data.decode()\r\n        message_dict = json.loads(message_json)\r\n        radar_detection = message_dict\r\n        radar_detection['timestamp'] = time.time()\r\n    return list(radar_detection.values())\r\n\r\n\r\ndef append_new_fall_value():\r\n    fall = 0\r\n    confidence_loc = 0\r\n    length_of_detection = 0\r\n    for detection in vid_detection:\r\n        if detection[0] != 0.0:\r\n            fall += detection[1]\r\n            confidence_loc += detection[2]\r\n            length_of_detection += 1\r\n    now = time.time()\r\n    vid_detection_for_fusion.append([now, fall / length_of_detection, confidence_loc / length_of_detection])\r\n\r\n\r\ndef loop():\r\n    UDP_IP = '192.168.242.148'\r\n    # UDP_IP = '10.249.54.144'\r\n    UDP_PORT = 6789\r\n    sock = socket.socket(socket.AF_INET,  # Internet\r\n                         socket.SOCK_DGRAM)  # UDP\r\n    sock.bind((UDP_IP, UDP_PORT))\r\n    newest_radar_detection = [0, 0, 0]  # initialize with 0 until acutal data arrives\r\n\r\n    mpDraw = mp.solutions.drawing_utils\r\n    mpPose = mp.solutions.pose\r\n    pose = mpPose.Pose()\r\n    cap = cv2.VideoCapture(0)\r\n    current = time.time()\r\n    latest_fusion_values = 0, 0, 0, 0, 0, 0\r\n    out = cv2.VideoWriter('outpy.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (1280, 720))\r\n\r\n    while True:\r\n\r\n        success, img = cap.read()\r\n        if not success:\r\n            print('webcam not found')\r\n            continue\r\n\r\n        results = inference(img, pose)\r\n\r\n        if results.pose_landmarks:\r\n            mpDraw.draw_landmarks(img, results.pose_landmarks, mpPose.POSE_CONNECTIONS)\r\n\r\n        img, fall, confidence = start_detection(results, img, latest_fusion_values)\r\n        now = time.time()\r\n        vid_detection.append([now, fall, confidence])\r\n\r\n        radar_detection = receive_per_udp(sock)\r\n        if radar_detection is not None:\r\n            newest_radar_detection = radar_detection\r\n            append_new_fall_value()\r\n            latest_fusion_values = fusion(newest_radar_detection, img)\r\n            current = time.time()\r\n\r\n        update_counter(latest_fusion_values)\r\n        out.write(img)\r\n        cv2.imshow(\"Image\", img)\r\n        if cv2.waitKey(1) == ord('q'):\r\n            break\r\n\r\n    cap.release()\r\n    cv2.destroyAllWindows()\r\n    cv2.waitKey(1)\r\n    out.release()\r\n\r\n\r\n##################################################################################################\r\n\r\n\r\n# fusion ######################################################################################\r\n\r\ndef fusion(radar_detection, img_loc):\r\n    vid = vid_detection_for_fusion[-1]\r\n    sum_of_confidences = 0\r\n    confidence_fusion = 0\r\n    fall_fusion = 0\r\n    # print(\"vid: \", vid[0])\r\n    # print(\"rad: \", radar_detection[0])\r\n    # print(abs(vid[0] - radar_detection[0]))\r\n    # wenn die letzen einträge weniger als eine Sekunde auseinander liegen\r\n    sum_of_confidences = vid[2] + radar_detection[2]\r\n    if sum_of_confidences != 0:\r\n        g_vid = vid[2] / sum_of_confidences\r\n        g_radar = radar_detection[2] / sum_of_confidences\r\n        fall_fusion = g_vid * vid[1] + g_radar * radar_detection[1]\r\n        confidence_fusion = sum_of_confidences / 2\r\n\r\n        # print(\"Video   Fall: \", round(vid[1], 2), \"  Conf: \", round(vid[2], 2))\r\n        # print(\"Radar   Fall: \", round(radar_detection[1], 2), \"    Conf: \", round(radar_detection[2], 2))\r\n        # print(\"Fusion   Fall: \", round(fall_fusion, 2), \"    Conf: \", round(confidence_fusion, 2))\r\n        # print()\r\n    return vid[1], vid[2], radar_detection[1], radar_detection[2], fall_fusion, confidence_fusion\r\n\r\n\r\ndef update_counter(latest_fusion_values_loc):\r\n    global counter_locked, fall_counter\r\n    video_fall, video_confidence, radar_fall, radar_confidence, fusion_fall, fusion_confidence = latest_fusion_values_loc\r\n    if not counter_locked:\r\n        if fusion_fall > 0.5:\r\n            fall_counter += 1\r\n            counter_locked = True\r\n    else:\r\n        if fusion_fall < 0.1:\r\n            counter_locked = False\r\n\r\n\r\nif __name__ == \"__main__\":\r\n    loop()\r\n\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/pose_estimation.py b/pose_estimation.py
+--- a/pose_estimation.py	(revision 4a62fd17ef37de5ba46dfbdc66e9ea44d3a822db)
++++ b/pose_estimation.py	(date 1636536136500)
+@@ -160,29 +160,29 @@
+         img_loc = cv2.rectangle(img_loc, start, end, color, thickness=3)
+         # img_loc = plot_text(img_loc, text, color, (20, 200))
+ 
+-        video_fall, video_confidence, radar_fall, radar_confidence, fusion_fall, fusion_confidence = latest_fusion_values_loc
++    video_fall, video_confidence, radar_fall, radar_confidence, fusion_fall, fusion_confidence = latest_fusion_values_loc
+ 
+-        video_text = "Video   Fall: " + str(round(video_fall, 2)) + "  Conf: " + str(round(video_confidence, 2))
+-        radar_text = "Radar   Fall: " + str(round(radar_fall, 2)) + "    Conf: " + str(round(radar_confidence, 2))
+-        fusion_text = "Fusion   Fall: " + str(round(fusion_fall, 2)) + "    Conf: " + str(round(fusion_confidence, 2))
++    video_text = "Video   Fall: " + str(round(video_fall, 2)) + "  Conf: " + str(round(video_confidence, 2))
++    radar_text = "Radar   Fall: " + str(round(radar_fall, 2)) + "    Conf: " + str(round(radar_confidence, 2))
++    fusion_text = "Fusion   Fall: " + str(round(fusion_fall, 2)) + "    Conf: " + str(round(fusion_confidence, 2))
+ 
+-        if video_fall > 0.5:
+-            color = (0, 0, 255)
+-        else:
+-            color = (0, 255, 0)
+-        plot_text(img_loc, video_text, color, (20, 30))
+-        if radar_fall > 0.5:
+-            color = (0, 0, 255)
+-        else:
+-            color = (0, 255, 0)
+-        plot_text(img_loc, radar_text, color, (20, 60))
+-        if fusion_fall > 0.5:
+-            color = (0, 0, 255)
+-        else:
+-            color = (0, 255, 0)
+-        plot_text(img_loc, fusion_text, color, (20, 90))
++    if video_fall > 0.5:
++        color = (0, 0, 255)
++    else:
++        color = (0, 255, 0)
++    plot_text(img_loc, video_text, color, (20, 30))
++    if radar_fall > 0.5:
++        color = (0, 0, 255)
++    else:
++        color = (0, 255, 0)
++    plot_text(img_loc, radar_text, color, (20, 60))
++    if fusion_fall > 0.5:
++        color = (0, 0, 255)
++    else:
++        color = (0, 255, 0)
++    plot_text(img_loc, fusion_text, color, (20, 90))
+ 
+-        plot_text(img_loc, str(fall_counter), (255, 255, 255), (img_loc.shape[1] - 40, 30))
++    plot_text(img_loc, str(fall_counter), (255, 255, 255), (img_loc.shape[1] - 40, 30))
+ 
+     return img_loc
+ 
+@@ -198,6 +198,13 @@
+ def start_detection(results_loc, img_loc, latest_fusion_values_loc):
+     global boxes
+     fall_value = 0
++
++    start = 0
++    end = 0
++    box_fall = 0
++    lines_fall = 0
++    lm_fall = 0
++
+     if results_loc.pose_landmarks:
+         lm_list = get_list(results_loc, img_loc)
+ 
+@@ -218,13 +225,14 @@
+         lm_fall = KF_lm.x[0]
+ 
+         fall_value = calculate_fall_value(box_fall, lines_fall, lm_fall)
+-
+-        img_loc = setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value,
+-                            latest_fusion_values_loc)
+         save_boxes(start, end)
++
++
+     else:
+         lm_list = []
+ 
++    img_loc = setup_img(img_loc, start, end, lm_list, box_fall, lines_fall, lm_fall, fall_value,
++                        latest_fusion_values_loc)
+     conf = calculate_confidence(img_loc, lm_list)
+ 
+     return img_loc, fall_value, conf
+@@ -276,6 +284,9 @@
+     if width == 0:
+         width = 1
+ 
++    if height==0:
++        height=1
++
+     fallen = np.clip((width / height - 1 / 4) / (1.05), 0, 1)
+ 
+     return fallen
+@@ -375,19 +386,20 @@
+ # fall detection landmarks ###################################################################
+ 
+ def detect_lm_fall(lm_list, img_loc):
+-    min = 10 * (len(lm_list) / 33)
+-    max_value = (len(lm_list) - min) / len(lm_list)
+-    h, w, c = img_loc.shape
+-    under_half = 0
+-    for lm in lm_list:
+-        if lm[2] > h * 0.5:
+-            under_half += 1
++    fall_value = 0
++    if len(lm_list) != 0:
++        min = 10 * (len(lm_list) / 33)
++        max_value = (len(lm_list) - min) / len(lm_list)
++        h, w, c = img_loc.shape
++        under_half = 0
++        for lm in lm_list:
++            if lm[2] > h * 0.5:
++                under_half += 1
+ 
+-    fall_value = ((under_half - min) / len(lm_list)) / max_value
++        fall_value = ((under_half - min) / len(lm_list)) / max_value
+ 
+-    if fall_value < 0:
+-        fall_value = 0
+-
++        if fall_value < 0:
++            fall_value = 0
+     return fall_value
+ 
+ 
+@@ -455,7 +467,7 @@
+ 
+ 
+ def loop():
+-    UDP_IP = '192.168.242.148'
++    UDP_IP = '192.168.203.225'
+     # UDP_IP = '10.249.54.144'
+     UDP_PORT = 6789
+     sock = socket.socket(socket.AF_INET,  # Internet
+@@ -469,7 +481,7 @@
+     cap = cv2.VideoCapture(0)
+     current = time.time()
+     latest_fusion_values = 0, 0, 0, 0, 0, 0
+-    out = cv2.VideoWriter('outpy.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (1280, 720))
++    #out = cv2.VideoWriter('outpy.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (1280, 720))
+ 
+     while True:
+ 
+@@ -495,7 +507,7 @@
+             current = time.time()
+ 
+         update_counter(latest_fusion_values)
+-        out.write(img)
++        #out.write(img)
+         cv2.imshow("Image", img)
+         if cv2.waitKey(1) == ord('q'):
+             break
+@@ -503,7 +515,7 @@
+     cap.release()
+     cv2.destroyAllWindows()
+     cv2.waitKey(1)
+-    out.release()
++    #out.release()
+ 
+ 
+ ##################################################################################################
+@@ -538,7 +550,7 @@
+     global counter_locked, fall_counter
+     video_fall, video_confidence, radar_fall, radar_confidence, fusion_fall, fusion_confidence = latest_fusion_values_loc
+     if not counter_locked:
+-        if fusion_fall > 0.5:
++        if fusion_fall > 0.5 and fusion_confidence > 0.25:
+             fall_counter += 1
+             counter_locked = True
+     else:
+Index: .idea/workspace.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+><?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<project version=\"4\">\r\n  <component name=\"ChangeListManager\">\r\n    <list default=\"true\" id=\"2790a2c6-cb4d-45af-b2d2-0bc152c7484c\" name=\"Default Changelist\" comment=\"added f\">\r\n      <change beforePath=\"$PROJECT_DIR$/.idea/workspace.xml\" beforeDir=\"false\" afterPath=\"$PROJECT_DIR$/.idea/workspace.xml\" afterDir=\"false\" />\r\n      <change beforePath=\"$PROJECT_DIR$/pose_estimation.py\" beforeDir=\"false\" afterPath=\"$PROJECT_DIR$/pose_estimation.py\" afterDir=\"false\" />\r\n    </list>\r\n    <option name=\"SHOW_DIALOG\" value=\"false\" />\r\n    <option name=\"HIGHLIGHT_CONFLICTS\" value=\"true\" />\r\n    <option name=\"HIGHLIGHT_NON_ACTIVE_CHANGELIST\" value=\"false\" />\r\n    <option name=\"LAST_RESOLUTION\" value=\"IGNORE\" />\r\n  </component>\r\n  <component name=\"FileTemplateManagerImpl\">\r\n    <option name=\"RECENT_TEMPLATES\">\r\n      <list>\r\n        <option value=\"Python Script\" />\r\n      </list>\r\n    </option>\r\n  </component>\r\n  <component name=\"Git.Settings\">\r\n    <option name=\"RECENT_BRANCH_BY_REPOSITORY\">\r\n      <map>\r\n        <entry key=\"$PROJECT_DIR$\" value=\"master\" />\r\n      </map>\r\n    </option>\r\n    <option name=\"RECENT_GIT_ROOT_PATH\" value=\"$PROJECT_DIR$\" />\r\n    <option name=\"UPDATE_TYPE\" value=\"MERGE\" />\r\n  </component>\r\n  <component name=\"ProjectId\" id=\"1yKXO3D0UfEmrUmcvR3NUtIeq3w\" />\r\n  <component name=\"ProjectLevelVcsManager\" settingsEditedManually=\"true\" />\r\n  <component name=\"ProjectViewState\">\r\n    <option name=\"hideEmptyMiddlePackages\" value=\"true\" />\r\n    <option name=\"showLibraryContents\" value=\"true\" />\r\n  </component>\r\n  <component name=\"PropertiesComponent\">\r\n    <property name=\"RunOnceActivity.OpenProjectViewOnStart\" value=\"true\" />\r\n    <property name=\"RunOnceActivity.ShowReadmeOnStart\" value=\"true\" />\r\n    <property name=\"SHARE_PROJECT_CONFIGURATION_FILES\" value=\"true\" />\r\n    <property name=\"last_opened_file_path\" value=\"$PROJECT_DIR$/test.py\" />\r\n    <property name=\"settings.editor.selected.configurable\" value=\"com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable\" />\r\n  </component>\r\n  <component name=\"RunManager\" selected=\"Python.pose_estimation\">\r\n    <configuration default=\"true\" type=\"PythonConfigurationType\" factoryName=\"Python\">\r\n      <module name=\"PoseEstimation\" />\r\n      <option name=\"INTERPRETER_OPTIONS\" value=\"\" />\r\n      <option name=\"PARENT_ENVS\" value=\"true\" />\r\n      <envs>\r\n        <env name=\"PYTHONUNBUFFERED\" value=\"1\" />\r\n      </envs>\r\n      <option name=\"SDK_HOME\" value=\"C:\\Users\\Gin\\AppData\\Local\\Programs\\Python\\Python38\\python.exe\" />\r\n      <option name=\"WORKING_DIRECTORY\" value=\"\" />\r\n      <option name=\"IS_MODULE_SDK\" value=\"false\" />\r\n      <option name=\"ADD_CONTENT_ROOTS\" value=\"true\" />\r\n      <option name=\"ADD_SOURCE_ROOTS\" value=\"true\" />\r\n      <option name=\"SCRIPT_NAME\" value=\"a\" />\r\n      <option name=\"PARAMETERS\" value=\"\" />\r\n      <option name=\"SHOW_COMMAND_LINE\" value=\"false\" />\r\n      <option name=\"EMULATE_TERMINAL\" value=\"false\" />\r\n      <option name=\"MODULE_MODE\" value=\"false\" />\r\n      <option name=\"REDIRECT_INPUT\" value=\"false\" />\r\n      <option name=\"INPUT_FILE\" value=\"\" />\r\n      <method v=\"2\" />\r\n    </configuration>\r\n    <configuration name=\"pose_estimation\" type=\"PythonConfigurationType\" factoryName=\"Python\" nameIsGenerated=\"true\">\r\n      <module name=\"PoseEstimation\" />\r\n      <option name=\"INTERPRETER_OPTIONS\" value=\"\" />\r\n      <option name=\"PARENT_ENVS\" value=\"true\" />\r\n      <envs>\r\n        <env name=\"PYTHONUNBUFFERED\" value=\"1\" />\r\n      </envs>\r\n      <option name=\"SDK_HOME\" value=\"C:\\Users\\Gin\\AppData\\Local\\Programs\\Python\\Python38\\python.exe\" />\r\n      <option name=\"WORKING_DIRECTORY\" value=\"$PROJECT_DIR$\" />\r\n      <option name=\"IS_MODULE_SDK\" value=\"false\" />\r\n      <option name=\"ADD_CONTENT_ROOTS\" value=\"true\" />\r\n      <option name=\"ADD_SOURCE_ROOTS\" value=\"true\" />\r\n      <option name=\"SCRIPT_NAME\" value=\"$PROJECT_DIR$/pose_estimation.py\" />\r\n      <option name=\"PARAMETERS\" value=\"\" />\r\n      <option name=\"SHOW_COMMAND_LINE\" value=\"false\" />\r\n      <option name=\"EMULATE_TERMINAL\" value=\"false\" />\r\n      <option name=\"MODULE_MODE\" value=\"false\" />\r\n      <option name=\"REDIRECT_INPUT\" value=\"false\" />\r\n      <option name=\"INPUT_FILE\" value=\"\" />\r\n      <method v=\"2\" />\r\n    </configuration>\r\n    <configuration name=\"test\" type=\"PythonConfigurationType\" factoryName=\"Python\" nameIsGenerated=\"true\">\r\n      <module name=\"PoseEstimation\" />\r\n      <option name=\"INTERPRETER_OPTIONS\" value=\"\" />\r\n      <option name=\"PARENT_ENVS\" value=\"true\" />\r\n      <envs>\r\n        <env name=\"PYTHONUNBUFFERED\" value=\"1\" />\r\n      </envs>\r\n      <option name=\"SDK_HOME\" value=\"C:\\Users\\Gin\\AppData\\Local\\Programs\\Python\\Python38\\python.exe\" />\r\n      <option name=\"WORKING_DIRECTORY\" value=\"$PROJECT_DIR$\" />\r\n      <option name=\"IS_MODULE_SDK\" value=\"false\" />\r\n      <option name=\"ADD_CONTENT_ROOTS\" value=\"true\" />\r\n      <option name=\"ADD_SOURCE_ROOTS\" value=\"true\" />\r\n      <option name=\"SCRIPT_NAME\" value=\"$PROJECT_DIR$/test.py\" />\r\n      <option name=\"PARAMETERS\" value=\"\" />\r\n      <option name=\"SHOW_COMMAND_LINE\" value=\"false\" />\r\n      <option name=\"EMULATE_TERMINAL\" value=\"false\" />\r\n      <option name=\"MODULE_MODE\" value=\"false\" />\r\n      <option name=\"REDIRECT_INPUT\" value=\"false\" />\r\n      <option name=\"INPUT_FILE\" value=\"\" />\r\n      <method v=\"2\" />\r\n    </configuration>\r\n    <list>\r\n      <item itemvalue=\"Python.pose_estimation\" />\r\n      <item itemvalue=\"Python.test\" />\r\n    </list>\r\n  </component>\r\n  <component name=\"SpellCheckerSettings\" RuntimeDictionaries=\"0\" Folders=\"0\" CustomDictionaries=\"0\" DefaultDictionary=\"application-level\" UseSingleDictionary=\"true\" transferred=\"true\" />\r\n  <component name=\"SvnConfiguration\">\r\n    <configuration />\r\n  </component>\r\n  <component name=\"TaskManager\">\r\n    <task active=\"true\" id=\"Default\" summary=\"Default task\">\r\n      <changelist id=\"2790a2c6-cb4d-45af-b2d2-0bc152c7484c\" name=\"Default Changelist\" comment=\"\" />\r\n      <created>1632001217542</created>\r\n      <option name=\"number\" value=\"Default\" />\r\n      <option name=\"presentableId\" value=\"Default\" />\r\n      <updated>1632001217542</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00001\" summary=\"1\">\r\n      <created>1632143265998</created>\r\n      <option name=\"number\" value=\"00001\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00001\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632143265998</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00002\" summary=\"2\">\r\n      <created>1632144986778</created>\r\n      <option name=\"number\" value=\"00002\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00002\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632144986778</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00003\" summary=\"3\">\r\n      <created>1632145438034</created>\r\n      <option name=\"number\" value=\"00003\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00003\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632145438034</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00004\" summary=\"3\">\r\n      <created>1632145505769</created>\r\n      <option name=\"number\" value=\"00004\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00004\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632145505769</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00005\" summary=\"4\">\r\n      <created>1632224247110</created>\r\n      <option name=\"number\" value=\"00005\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00005\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632224247111</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00006\" summary=\"aufgeräumt\">\r\n      <created>1632309641507</created>\r\n      <option name=\"number\" value=\"00006\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00006\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632309641507</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00007\" summary=\"deque eingefügt\">\r\n      <created>1632310760051</created>\r\n      <option name=\"number\" value=\"00007\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00007\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632310760051</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00008\" summary=\"Geruest detection\">\r\n      <created>1632311930198</created>\r\n      <option name=\"number\" value=\"00008\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00008\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632311930198</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00009\" summary=\"Geruest detection\">\r\n      <created>1632312401167</created>\r\n      <option name=\"number\" value=\"00009\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00009\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632312401167</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00010\" summary=\"Geruest detection\">\r\n      <created>1632409384057</created>\r\n      <option name=\"number\" value=\"00010\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00010\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632409384057</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00011\" summary=\"Combined\">\r\n      <created>1632409422486</created>\r\n      <option name=\"number\" value=\"00011\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00011\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632409422486</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00012\" summary=\"Combined\">\r\n      <created>1632409525485</created>\r\n      <option name=\"number\" value=\"00012\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00012\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632409525485</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00013\" summary=\"Combined\">\r\n      <created>1632409932030</created>\r\n      <option name=\"number\" value=\"00013\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00013\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632409932030</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00014\" summary=\"bugfixes\">\r\n      <created>1632410586789</created>\r\n      <option name=\"number\" value=\"00014\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00014\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632410586789</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00015\" summary=\"bugfixes\">\r\n      <created>1632411089798</created>\r\n      <option name=\"number\" value=\"00015\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00015\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632411089799</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00016\" summary=\"bugfixes\">\r\n      <created>1632411265048</created>\r\n      <option name=\"number\" value=\"00016\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00016\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632411265048</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00017\" summary=\"bugfixes\">\r\n      <created>1632411757571</created>\r\n      <option name=\"number\" value=\"00017\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00017\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632411757571</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00018\" summary=\"bugfixes\">\r\n      <created>1632412776675</created>\r\n      <option name=\"number\" value=\"00018\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00018\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1632412776675</updated>\r\n    </task>\r\n    <task id=\"LOCAL-00019\" summary=\"udp multiprocessors added\">\r\n      <created>1633307649916</created>\r\n      <option name=\"number\" value=\"00019\" />\r\n      <option name=\"presentableId\" value=\"LOCAL-00019\" />\r\n      <option name=\"project\" value=\"LOCAL\" />\r\n      <updated>1633307649916</updated>\r\n    </task>\r\n    <option name=\"localTasksCounter\" value=\"20\" />\r\n    <servers />\r\n  </component>\r\n  <component name=\"VcsManagerConfiguration\">\r\n    <MESSAGE value=\"1\" />\r\n    <MESSAGE value=\"2\" />\r\n    <MESSAGE value=\"3\" />\r\n    <MESSAGE value=\"4\" />\r\n    <MESSAGE value=\"aufgeräumt\" />\r\n    <MESSAGE value=\"deque eingefügt\" />\r\n    <MESSAGE value=\"Geruest detection\" />\r\n    <MESSAGE value=\"Combined\" />\r\n    <MESSAGE value=\"bugfixes\" />\r\n    <MESSAGE value=\"udp multiprocessors added\" />\r\n    <option name=\"LAST_COMMIT_MESSAGE\" value=\"udp multiprocessors added\" />\r\n  </component>\r\n  <component name=\"WindowStateProjectService\">\r\n    <state x=\"414\" y=\"175\" width=\"1092\" height=\"706\" key=\"#com.intellij.execution.impl.EditConfigurationsDialog\" timestamp=\"1633301251188\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"414\" y=\"175\" width=\"1092\" height=\"706\" key=\"#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632139033606\" />\r\n    <state x=\"414\" y=\"175\" key=\"#com.intellij.execution.impl.EditConfigurationsDialog/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633301251188\" />\r\n    <state x=\"218\" y=\"84\" width=\"1352\" height=\"956\" key=\"CommitChangelistDialog2\" timestamp=\"1633310362878\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"614\" y=\"114\" key=\"CommitChangelistDialog2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632412775904\" />\r\n    <state x=\"218\" y=\"84\" width=\"1352\" height=\"956\" key=\"CommitChangelistDialog2/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633310362878\" />\r\n    <state x=\"740\" y=\"283\" key=\"FileChooserDialogImpl\" timestamp=\"1633302330623\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"740\" y=\"283\" key=\"FileChooserDialogImpl/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632002798080\" />\r\n    <state x=\"740\" y=\"283\" key=\"FileChooserDialogImpl/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633302330623\" />\r\n    <state x=\"824\" y=\"413\" width=\"272\" height=\"270\" key=\"Github.ShareDialog\" timestamp=\"1632002845193\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"824\" y=\"413\" width=\"272\" height=\"270\" key=\"Github.ShareDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632002845193\" />\r\n    <state x=\"768\" y=\"225\" key=\"Github.UntrackedFilesDialog\" timestamp=\"1632002848759\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"768\" y=\"225\" key=\"Github.UntrackedFilesDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632002848759\" />\r\n    <state width=\"1899\" height=\"282\" key=\"GridCell.Tab.0.bottom\" timestamp=\"1633315373651\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state width=\"1741\" height=\"282\" key=\"GridCell.Tab.0.bottom/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632414367826\" />\r\n    <state width=\"1899\" height=\"282\" key=\"GridCell.Tab.0.bottom/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633315373651\" />\r\n    <state width=\"1899\" height=\"282\" key=\"GridCell.Tab.0.center\" timestamp=\"1633315373650\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state width=\"1741\" height=\"282\" key=\"GridCell.Tab.0.center/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632414367826\" />\r\n    <state width=\"1899\" height=\"282\" key=\"GridCell.Tab.0.center/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633315373650\" />\r\n    <state width=\"1899\" height=\"282\" key=\"GridCell.Tab.0.left\" timestamp=\"1633315373650\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state width=\"1741\" height=\"282\" key=\"GridCell.Tab.0.left/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632414367826\" />\r\n    <state width=\"1899\" height=\"282\" key=\"GridCell.Tab.0.left/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633315373650\" />\r\n    <state width=\"1899\" height=\"282\" key=\"GridCell.Tab.0.right\" timestamp=\"1633315373650\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state width=\"1741\" height=\"282\" key=\"GridCell.Tab.0.right/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632414367826\" />\r\n    <state width=\"1899\" height=\"282\" key=\"GridCell.Tab.0.right/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633315373650\" />\r\n    <state width=\"1899\" height=\"348\" key=\"GridCell.Tab.1.bottom\" timestamp=\"1633307176442\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state width=\"949\" height=\"348\" key=\"GridCell.Tab.1.bottom/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632412653586\" />\r\n    <state width=\"1899\" height=\"348\" key=\"GridCell.Tab.1.bottom/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633307176442\" />\r\n    <state width=\"1899\" height=\"348\" key=\"GridCell.Tab.1.center\" timestamp=\"1633307176442\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state width=\"949\" height=\"348\" key=\"GridCell.Tab.1.center/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632412653586\" />\r\n    <state width=\"1899\" height=\"348\" key=\"GridCell.Tab.1.center/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633307176442\" />\r\n    <state width=\"1899\" height=\"348\" key=\"GridCell.Tab.1.left\" timestamp=\"1633307176442\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state width=\"949\" height=\"348\" key=\"GridCell.Tab.1.left/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632412653586\" />\r\n    <state width=\"1899\" height=\"348\" key=\"GridCell.Tab.1.left/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633307176442\" />\r\n    <state width=\"1899\" height=\"348\" key=\"GridCell.Tab.1.right\" timestamp=\"1633307176442\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state width=\"949\" height=\"348\" key=\"GridCell.Tab.1.right/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632412653586\" />\r\n    <state width=\"1899\" height=\"348\" key=\"GridCell.Tab.1.right/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633307176442\" />\r\n    <state x=\"693\" y=\"199\" key=\"SettingsEditor\" timestamp=\"1632139094051\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"693\" y=\"199\" key=\"SettingsEditor/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632139094051\" />\r\n    <state x=\"552\" y=\"253\" key=\"Vcs.Push.Dialog.v2\" timestamp=\"1633307651225\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"552\" y=\"253\" key=\"Vcs.Push.Dialog.v2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632412779310\" />\r\n    <state x=\"552\" y=\"253\" key=\"Vcs.Push.Dialog.v2/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633307651225\" />\r\n    <state x=\"656\" y=\"344\" key=\"com.intellij.ide.util.TipDialog\" timestamp=\"1632402203343\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"656\" y=\"344\" key=\"com.intellij.ide.util.TipDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632402203343\" />\r\n    <state x=\"769\" y=\"437\" key=\"com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2\" timestamp=\"1633305092998\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"769\" y=\"437\" key=\"com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040\" timestamp=\"1633305092998\" />\r\n    <state x=\"701\" y=\"163\" key=\"refactoring.ChangeSignatureDialog\" timestamp=\"1632309380384\">\r\n      <screen x=\"0\" y=\"0\" width=\"1920\" height=\"1040\" />\r\n    </state>\r\n    <state x=\"701\" y=\"163\" key=\"refactoring.ChangeSignatureDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040\" timestamp=\"1632309380384\" />\r\n  </component>\r\n</project>
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/workspace.xml b/.idea/workspace.xml
+--- a/.idea/workspace.xml	(revision 4a62fd17ef37de5ba46dfbdc66e9ea44d3a822db)
++++ b/.idea/workspace.xml	(date 1636534242786)
+@@ -68,7 +68,7 @@
+       <envs>
+         <env name="PYTHONUNBUFFERED" value="1" />
+       </envs>
+-      <option name="SDK_HOME" value="C:\Users\Gin\AppData\Local\Programs\Python\Python38\python.exe" />
++      <option name="SDK_HOME" value="C:\Users\bgint\AppData\Local\Programs\Python\Python38\python.exe" />
+       <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+       <option name="IS_MODULE_SDK" value="false" />
+       <option name="ADD_CONTENT_ROOTS" value="true" />
+@@ -269,90 +269,4 @@
+     <MESSAGE value="udp multiprocessors added" />
+     <option name="LAST_COMMIT_MESSAGE" value="udp multiprocessors added" />
+   </component>
+-  <component name="WindowStateProjectService">
+-    <state x="414" y="175" width="1092" height="706" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1633301251188">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="414" y="175" width="1092" height="706" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632139033606" />
+-    <state x="414" y="175" key="#com.intellij.execution.impl.EditConfigurationsDialog/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633301251188" />
+-    <state x="218" y="84" width="1352" height="956" key="CommitChangelistDialog2" timestamp="1633310362878">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="614" y="114" key="CommitChangelistDialog2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632412775904" />
+-    <state x="218" y="84" width="1352" height="956" key="CommitChangelistDialog2/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633310362878" />
+-    <state x="740" y="283" key="FileChooserDialogImpl" timestamp="1633302330623">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="740" y="283" key="FileChooserDialogImpl/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632002798080" />
+-    <state x="740" y="283" key="FileChooserDialogImpl/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633302330623" />
+-    <state x="824" y="413" width="272" height="270" key="Github.ShareDialog" timestamp="1632002845193">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="824" y="413" width="272" height="270" key="Github.ShareDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632002845193" />
+-    <state x="768" y="225" key="Github.UntrackedFilesDialog" timestamp="1632002848759">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="768" y="225" key="Github.UntrackedFilesDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632002848759" />
+-    <state width="1899" height="282" key="GridCell.Tab.0.bottom" timestamp="1633315373651">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state width="1741" height="282" key="GridCell.Tab.0.bottom/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632414367826" />
+-    <state width="1899" height="282" key="GridCell.Tab.0.bottom/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633315373651" />
+-    <state width="1899" height="282" key="GridCell.Tab.0.center" timestamp="1633315373650">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state width="1741" height="282" key="GridCell.Tab.0.center/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632414367826" />
+-    <state width="1899" height="282" key="GridCell.Tab.0.center/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633315373650" />
+-    <state width="1899" height="282" key="GridCell.Tab.0.left" timestamp="1633315373650">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state width="1741" height="282" key="GridCell.Tab.0.left/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632414367826" />
+-    <state width="1899" height="282" key="GridCell.Tab.0.left/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633315373650" />
+-    <state width="1899" height="282" key="GridCell.Tab.0.right" timestamp="1633315373650">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state width="1741" height="282" key="GridCell.Tab.0.right/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632414367826" />
+-    <state width="1899" height="282" key="GridCell.Tab.0.right/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633315373650" />
+-    <state width="1899" height="348" key="GridCell.Tab.1.bottom" timestamp="1633307176442">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state width="949" height="348" key="GridCell.Tab.1.bottom/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632412653586" />
+-    <state width="1899" height="348" key="GridCell.Tab.1.bottom/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633307176442" />
+-    <state width="1899" height="348" key="GridCell.Tab.1.center" timestamp="1633307176442">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state width="949" height="348" key="GridCell.Tab.1.center/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632412653586" />
+-    <state width="1899" height="348" key="GridCell.Tab.1.center/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633307176442" />
+-    <state width="1899" height="348" key="GridCell.Tab.1.left" timestamp="1633307176442">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state width="949" height="348" key="GridCell.Tab.1.left/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632412653586" />
+-    <state width="1899" height="348" key="GridCell.Tab.1.left/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633307176442" />
+-    <state width="1899" height="348" key="GridCell.Tab.1.right" timestamp="1633307176442">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state width="949" height="348" key="GridCell.Tab.1.right/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632412653586" />
+-    <state width="1899" height="348" key="GridCell.Tab.1.right/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633307176442" />
+-    <state x="693" y="199" key="SettingsEditor" timestamp="1632139094051">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="693" y="199" key="SettingsEditor/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632139094051" />
+-    <state x="552" y="253" key="Vcs.Push.Dialog.v2" timestamp="1633307651225">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="552" y="253" key="Vcs.Push.Dialog.v2/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632412779310" />
+-    <state x="552" y="253" key="Vcs.Push.Dialog.v2/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633307651225" />
+-    <state x="656" y="344" key="com.intellij.ide.util.TipDialog" timestamp="1632402203343">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="656" y="344" key="com.intellij.ide.util.TipDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632402203343" />
+-    <state x="769" y="437" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1633305092998">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="769" y="437" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/1920.0.1920.1040/-1920.0.1920.1040/0.0.1920.1040@0.0.1920.1040" timestamp="1633305092998" />
+-    <state x="701" y="163" key="refactoring.ChangeSignatureDialog" timestamp="1632309380384">
+-      <screen x="0" y="0" width="1920" height="1040" />
+-    </state>
+-    <state x="701" y="163" key="refactoring.ChangeSignatureDialog/0.0.1920.1040/1920.0.1920.1040/-1920.0.1920.1040@0.0.1920.1040" timestamp="1632309380384" />
+-  </component>
+ </project>
+\ No newline at end of file

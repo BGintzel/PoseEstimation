@@ -463,7 +463,7 @@ def append_new_fall_value():
 
 
 def loop():
-    UDP_IP = '192.168.203.225'
+    UDP_IP = 'TODO'
     # UDP_IP = '10.249.54.144'
     UDP_PORT = 6789
     sock = socket.socket(socket.AF_INET,  # Internet
@@ -505,6 +505,8 @@ def loop():
 
         update_counter(latest_fusion_values)
         # out.write(img)
+        img = cv2.resize(img, (int(1000.0 * 1.333333), 1000))
+        print(img.shape)
         cv2.imshow("Image", img)
         if cv2.waitKey(1) == ord('q'):
             break
@@ -521,7 +523,7 @@ def loop():
 # fusion ######################################################################################
 
 def fusion(radar_detection, img_loc, new_radar_is_valid):
-    print(time.time()-radar_detection[0])
+    #print(time.time()-radar_detection[0])
     if not new_radar_is_valid and time.time()-radar_detection[0]>3:
         radar_detection[2] = 0
         radar_detection[1] = -1
@@ -551,11 +553,11 @@ def update_counter(latest_fusion_values_loc):
     global counter_locked, fall_counter
     video_fall, video_confidence, radar_fall, radar_confidence, fusion_fall, fusion_confidence = latest_fusion_values_loc
     if not counter_locked:
-        if fusion_fall > 0.5:
+        if fusion_fall > 0.5 and fusion_confidence > 0:
             fall_counter += 1
             counter_locked = True
     else:
-        if fusion_fall < 0.1:
+        if fusion_fall < 0.2:
             counter_locked = False
 
 
